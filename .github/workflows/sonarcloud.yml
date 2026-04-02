@@ -1,0 +1,70 @@
+name: SonarCloud
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: sonarcloud-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sonarcloud:
+    name: Bootstrap SonarCloud analysis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check SonarCloud prerequisites
+        id: precheck
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          if [ -f build.gradle.kts ] && [ -f settings.gradle.kts ] && [ -f gradlew ]; then
+            echo "has_gradle=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_gradle=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ -n "${SONAR_TOKEN:-}" ]; then
+            echo "has_token=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_token=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip until Gradle project and SONAR_TOKEN are available
+        if: ${{ steps.precheck.outputs.has_gradle != 'true' || steps.precheck.outputs.has_token != 'true' }}
+        run: |
+          echo "SonarCloud bootstrap is installed, but analysis is not active yet."
+          echo "has_gradle=${{ steps.precheck.outputs.has_gradle }}"
+          echo "has_token=${{ steps.precheck.outputs.has_token }}"
+          echo "Next steps: add the Gradle project files and configure the SONAR_TOKEN repository secret."
+
+      - name: Set up JetBrains Runtime 25
+        if: ${{ steps.precheck.outputs.has_gradle == 'true' && steps.precheck.outputs.has_token == 'true' }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: jetbrains
+          java-version: '25'
+
+      - name: Set up Gradle
+        if: ${{ steps.precheck.outputs.has_gradle == 'true' && steps.precheck.outputs.has_token == 'true' }}
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build and analyze with SonarCloud
+        if: ${{ steps.precheck.outputs.has_gradle == 'true' && steps.precheck.outputs.has_token == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: ./gradlew --no-daemon build sonar

@@ -78,7 +78,7 @@ jobs:
 
       - name: Analyze with SonarCloud GitHub Action
         if: ${{ steps.precheck.outputs.has_gradle != 'true' && steps.precheck.outputs.has_token == 'true' && steps.precheck.outputs.has_sonar_properties == 'true' }}
-        uses: SonarSource/sonarqube-scan-action@v4.2.1
+        uses: SonarSource/sonarcloud-github-action@v3.1.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

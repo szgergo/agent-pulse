@@ -25,7 +25,8 @@ This document explains, step by step, how agent-pulse can detect and monitor run
 7. [File System Watching Strategy](#file-system-watching-strategy)
 8. [Combining Detection Layers](#combining-detection-layers)
 9. [Extractable Information per Agent](#extractable-information-per-agent)
-10. [Sources](#sources)
+10. [Architectural Implication: Embedded OTLP Receiver](#architectural-implication-embedded-otlp-receiver)
+11. [Sources](#sources)
 
 ---
 
@@ -762,7 +763,9 @@ Same data as Copilot CLI (identical `events.jsonl`, `workspace.yaml`, lock files
 
 ### Claude Code CLI
 
-Claude Code stores less structured session data than Copilot CLI. Its primary file artifacts are project memories and debug logs, not per-session event streams.
+Claude Code has **two distinct monitoring tiers**: file-based (basic) and OpenTelemetry (excellent). Without OTel, Claude Code provides only process-level data and project memories. **With OTel enabled**, Claude Code emits structured telemetry rivaling Copilot CLI's `events.jsonl` in richness.
+
+#### Tier 1: File-Based Detection (Always Available)
 
 | Data Point | Source | How to Extract | Available |
 |---|---|---|---|
@@ -776,43 +779,93 @@ Claude Code stores less structured session data than Copilot CLI. Its primary fi
 | Config backups | `~/.claude/backups/` | Timestamped backup files | Yes |
 | Global instructions | `~/.claude/CLAUDE.md` | Read markdown | Yes (if exists) |
 | Project instructions | `<project>/.claude/settings.json` | JSON with permissions, tool config | Yes (if exists) |
-| OpenTelemetry events | OTLP export (if configured) | Structured spans and events | Conditional |
-| Session ID | None externally | Not written to predictable file | No |
-| Token usage | None externally | Not in file artifacts | No |
-| Conversation content | None externally | Not persisted to accessible files | No |
 
-**OpenTelemetry integration** (if Claude Code is configured with OTLP export):
+#### Tier 2: OpenTelemetry Integration (When Configured)
 
-Claude Code can emit structured telemetry including:
-- Session start/stop events
-- Tool execution attempts (with accept/reject decisions)
-- Prompts submitted
-- API requests made
-- Subagent and MCP tool usage
+Claude Code has **first-class, official OpenTelemetry support** documented at [code.claude.com/docs/en/monitoring-usage](https://code.claude.com/docs/en/monitoring-usage). When the user enables it (`CLAUDE_CODE_ENABLE_TELEMETRY=1`), Claude Code exports rich structured data via standard OTLP protocol.
 
-This requires the user to configure OTLP export in Claude Code settings. agent-pulse could optionally consume this stream if available.
+**How agent-pulse enables this:** agent-pulse runs a local OTLP receiver on `localhost:4317` (gRPC) or `localhost:4318` (HTTP). The user sets:
+```bash
+export CLAUDE_CODE_ENABLE_TELEMETRY=1
+export OTEL_METRICS_EXPORTER=otlp
+export OTEL_LOGS_EXPORTER=otlp
+export OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+```
+Or agent-pulse can auto-configure this via the managed settings file at `/Library/Application Support/ClaudeCode/managed-settings.json` (macOS).
 
-Source: [Monad: Detection engineering for Claude Code](https://www.monad.com/blog/detection-engineering-for-claude-code-part-1)
+**Metrics available via OTel** (from official docs):
+
+| Metric Name | Description | Unit | Key Attributes |
+|---|---|---|---|
+| `claude_code.session.count` | CLI sessions started | count | session.id, user.account_uuid |
+| `claude_code.token.usage` | Tokens used | tokens | type (input/output/cacheRead/cacheCreation), model |
+| `claude_code.cost.usage` | Session cost | USD | model |
+| `claude_code.lines_of_code.count` | Lines modified | count | type (added/removed) |
+| `claude_code.commit.count` | Git commits created | count | — |
+| `claude_code.pull_request.count` | PRs created | count | — |
+| `claude_code.code_edit_tool.decision` | Tool permission decisions | count | tool_name, decision (accept/reject), source |
+| `claude_code.active_time.total` | Active usage time | seconds | type (user/cli) |
+
+**Events available via OTel** (from official docs):
+
+| Event Name | Description | Key Attributes |
+|---|---|---|
+| `claude_code.user_prompt` | User submits a prompt | prompt_length, prompt (if OTEL_LOG_USER_PROMPTS=1) |
+| `claude_code.tool_result` | Tool completes execution | tool_name, success, duration_ms, decision_type, decision_source |
+| `claude_code.api_request` | API request to Claude | model, cost_usd, duration_ms, input_tokens, output_tokens, cache_read_tokens |
+| `claude_code.api_error` | API request fails | model, error, status_code, attempt |
+| `claude_code.tool_decision` | Tool permission decision | tool_name, decision (accept/reject), source |
+
+**Standard attributes on ALL metrics/events:**
+- `session.id` — unique session identifier
+- `organization.id` — org UUID (when authenticated)
+- `user.account_uuid` — account UUID
+- `user.email` — user email (when OAuth authenticated)
+- `terminal.type` — terminal type (iTerm, vscode, cursor, tmux)
+- `prompt.id` — UUID correlating events to the user prompt that triggered them
+
+**Privacy controls:**
+- Telemetry is **opt-in** (disabled by default)
+- Prompt content is **redacted by default** (only `prompt_length` logged)
+- Tool inputs/parameters are **redacted by default**
+- Both can be enabled with `OTEL_LOG_USER_PROMPTS=1` and `OTEL_LOG_TOOL_DETAILS=1`
+
+Sources:
+- [Official Claude Code Monitoring Docs](https://code.claude.com/docs/en/monitoring-usage)
+- [Monad: Detection engineering for Claude Code](https://www.monad.com/blog/detection-engineering-for-claude-code-part-1)
+- [BindPlane: Per-Session Cost and Token Tracking](https://bindplane.com/blog/claude-code-opentelemetry-per-session-cost-and-token-tracking)
 
 **What agent-pulse can display for Claude Code:**
+
+*Without OTel (Tier 1):*
 - Real-time: active status, CPU/memory, working directory
 - Context: project memory content (MEMORY.md), configured instructions
-- Limitation: no token metrics, conversation content, or session IDs from file artifacts alone
-- Future: OpenTelemetry integration could provide rich session data if configured
+- Limitation: no token metrics, conversation content, or session IDs
+
+*With OTel (Tier 2 — recommended):*
+- Real-time: active status, current model, cost accumulating, tool calls in progress
+- Session: session ID, token usage (input/output/cache per model), cost in USD, active time
+- Code impact: lines added/removed, commits created, PRs opened
+- Tool usage: every tool call with success/failure, duration, permission decisions
+- API: every API request with model, tokens, cost, duration, cache stats
+- Prompts: user prompt lengths (or full content if opted in)
+- **This makes Claude Code monitoring comparable to Copilot CLI in richness**
 
 ---
 
 ### Claude Code in VS Code
 
-Same data as Claude Code CLI. The VS Code extension is a bridge to the CLI process.
+Same data as Claude Code CLI (both tiers). The VS Code extension is a bridge to the CLI process.
 
 | Data Point | Source | Unique to VS Code |
 |---|---|---|
-| All Claude Code CLI fields | (same as above) | No |
+| All Claude Code CLI fields (Tier 1 + Tier 2) | (same as above) | No |
 | IDE identification | Process tree (OSHI) | Yes — parent is VS Code extension host |
+| Terminal type attribute | OTel `terminal.type` | Yes — reports `"vscode"` automatically |
 
 **What agent-pulse can display additionally:**
-- IDE badge: "VS Code" indicator on the Claude Code session
+- IDE badge: "VS Code" indicator on the Claude Code session (detected via process tree or OTel `terminal.type` attribute)
 
 ---
 
@@ -901,15 +954,132 @@ Cursor stores agent checkpoints and logs per-project, providing moderate visibil
 | **Copilot CLI** | ●●● | ●●● | ●●● | ●●● | ●●● | ●●● | **Excellent** |
 | **Copilot VS Code** | ●●● | ●●● | ●●● | ●●● | ●●● | ●●● | **Excellent** |
 | **Copilot IntelliJ** | ●●○ | ●○○ | ●○○ | ○○○ | ○○○ | ○○○ | **Limited** |
-| **Claude Code CLI** | ●●○ | ●●○ | ●○○ | ○○○ | ○○○ | ○○○ | **Basic** |
-| **Claude Code VS Code** | ●●○ | ●●○ | ●○○ | ○○○ | ○○○ | ○○○ | **Basic** |
+| **Claude Code CLI** (file only) | ●●○ | ●●○ | ●○○ | ○○○ | ○○○ | ○○○ | **Basic** |
+| **Claude Code CLI** (with OTel) | ●●● | ●●● | ●●● | ●●● | ●●● | ●●○ | **Excellent** |
+| **Claude Code VS Code** (file only) | ●●○ | ●●○ | ●○○ | ○○○ | ○○○ | ○○○ | **Basic** |
+| **Claude Code VS Code** (with OTel) | ●●● | ●●● | ●●● | ●●● | ●●● | ●●○ | **Excellent** |
 | **Codex CLI** | ●●○ | ●●○ | ●●○ | ●○○ | ●●○ | ●●○ | **Good** |
 | **Gemini CLI** | ●●○ | ●●○ | ●●○ | ●○○ | ○○○ | ●●○ | **Good** |
 | **Cursor IDE** | ●●○ | ●●○ | ●○○ | ○○○ | ○○○ | ○○○ | **Basic** |
 
 Key: ●●● = rich data / ●●○ = moderate / ●○○ = minimal / ○○○ = not available
 
-**Key takeaway:** GitHub Copilot CLI provides by far the richest external monitoring data thanks to its structured `events.jsonl` log and metadata files. Codex and Gemini offer good session transcripts. Claude Code and Cursor provide mainly process-level data unless OpenTelemetry or internal APIs become available.
+Key: ●●○ for Conversation in Claude Code + OTel reflects that prompt content is redacted by default (only lengths). Full content requires explicit `OTEL_LOG_USER_PROMPTS=1` opt-in.
+
+**Key takeaway:** GitHub Copilot CLI and Claude Code (with OTel) are the two richest monitoring targets. Copilot writes everything to local files automatically. Claude Code requires opt-in telemetry configuration but then provides equally rich data via OTLP — tokens, cost, tool calls, code impact, and session IDs. **agent-pulse should treat OTLP ingestion as a first-class feature**, not optional, since it transforms Claude Code from "Basic" to "Excellent" and positions agent-pulse as a zero-config receiver that replaces the need for Grafana/Prometheus stacks for individual developers.
+
+---
+
+## Architectural Implication: Embedded OTLP Receiver
+
+The Claude Code telemetry discovery has a significant architectural implication for agent-pulse. To unlock "Excellent" monitoring for Claude Code (and potentially other OTel-emitting agents in the future), agent-pulse needs an **embedded OTLP receiver** — a local gRPC/HTTP server that accepts standard OpenTelemetry data.
+
+### Why This Matters
+
+Without an OTLP receiver, agent-pulse is limited to file-watching and process-scanning. That works well for Copilot CLI (which writes rich `events.jsonl` files) but leaves Claude Code at "Basic" level — just process detection and project memory files. With an OTLP receiver, Claude Code jumps to "Excellent" — matching Copilot CLI's richness with tokens, cost, tool calls, code impact, and more.
+
+This also future-proofs agent-pulse. Any tool that adopts OpenTelemetry (and the trend is clear — Claude Code, LangChain, LlamaIndex all support it) can feed data into agent-pulse without needing a custom provider.
+
+### Implementation Approach
+
+**agent-pulse acts as a lightweight, embedded OTLP collector on localhost.** No separate Collector process, no Docker, no Prometheus stack — just a gRPC or HTTP endpoint built into the app.
+
+Two viable approaches for the Kotlin/JVM stack:
+
+#### Option 1: gRPC Server (Recommended)
+
+Implement the OTLP gRPC services directly using `grpc-java` + `opentelemetry-proto`:
+
+```kotlin
+// Conceptual — Kotlin gRPC server receiving Claude Code telemetry
+val server = ServerBuilder.forPort(4317)
+    .addService(object : MetricsServiceGrpc.MetricsServiceImplBase() {
+        override fun export(request: ExportMetricsServiceRequest, 
+                          responseObserver: StreamObserver<ExportMetricsServiceResponse>) {
+            // Parse metrics: token.usage, cost.usage, session.count, etc.
+            request.resourceMetricsList.forEach { processMetrics(it) }
+            responseObserver.onNext(ExportMetricsServiceResponse.getDefaultInstance())
+            responseObserver.onCompleted()
+        }
+    })
+    .addService(object : LogsServiceGrpc.LogsServiceImplBase() {
+        override fun export(request: ExportLogsServiceRequest,
+                          responseObserver: StreamObserver<ExportLogsServiceResponse>) {
+            // Parse events: user_prompt, tool_result, api_request, etc.
+            request.resourceLogsList.forEach { processLogs(it) }
+            responseObserver.onNext(ExportLogsServiceResponse.getDefaultInstance())
+            responseObserver.onCompleted()
+        }
+    })
+    .build()
+```
+
+Dependencies:
+- `io.grpc:grpc-netty-shaded` — gRPC server runtime
+- `io.opentelemetry.proto:opentelemetry-proto` — OTLP protobuf definitions
+- These are well-maintained, standard Java libraries
+
+Pros: Standard OTLP port (4317), Claude Code's default protocol, high performance
+Cons: Adds ~5MB to bundle, protobuf compilation step
+
+#### Option 2: HTTP/JSON Endpoint
+
+Simpler alternative — implement OTLP HTTP/JSON receiver using Ktor or a lightweight HTTP server:
+
+```kotlin
+// OTLP HTTP/JSON on port 4318
+embeddedServer(Netty, port = 4318) {
+    routing {
+        post("/v1/metrics") {
+            val body = call.receiveText()
+            val metrics = Json.decodeFromString<OtlpMetricsPayload>(body)
+            processMetrics(metrics)
+            call.respond(HttpStatusCode.OK)
+        }
+        post("/v1/logs") {
+            val body = call.receiveText()
+            val logs = Json.decodeFromString<OtlpLogsPayload>(body)
+            processLogs(logs)
+            call.respond(HttpStatusCode.OK)
+        }
+    }
+}.start()
+```
+
+Pros: No protobuf dependency, simpler code, Ktor is already a natural Kotlin fit
+Cons: Requires `OTEL_EXPORTER_OTLP_PROTOCOL=http/json` config (not the default `grpc`), slightly higher overhead
+
+### User Experience Flow
+
+1. User installs agent-pulse → OTLP receiver starts automatically on localhost
+2. agent-pulse shows a one-time setup prompt: "Enable rich Claude Code monitoring?"
+3. If yes, agent-pulse writes the managed settings file:
+   ```
+   /Library/Application Support/ClaudeCode/managed-settings.json
+   ```
+   ```json
+   {
+     "env": {
+       "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+       "OTEL_METRICS_EXPORTER": "otlp",
+       "OTEL_LOGS_EXPORTER": "otlp",
+       "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+       "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4317"
+     }
+   }
+   ```
+4. Next time Claude Code starts, it automatically exports telemetry to agent-pulse
+5. Claude Code sessions in the dashboard now show full metrics, cost, tool calls, etc.
+
+**Note:** The managed settings path requires write access to `/Library/Application Support/` (may need admin privileges on macOS). Alternative: agent-pulse can guide the user to add env vars to their shell profile, or write to `~/.claude/settings.json` instead.
+
+### Port Conflict Handling
+
+If another OTLP collector is already running on port 4317 (e.g., Grafana Alloy, otel-collector), agent-pulse should:
+1. Detect the conflict on startup
+2. Offer to use an alternative port (e.g., 4320)
+3. Update the Claude Code configuration accordingly
+4. Or offer "passthrough" mode: receive data and forward to the existing collector
 
 ---
 
@@ -919,6 +1089,7 @@ Key: ●●● = rich data / ●●○ = moderate / ●○○ = minimal / ○○
 - [GitHub Docs: Copilot CLI session data](https://docs.github.com/en/copilot/concepts/agents/copilot-cli/chronicle)
 - [GitHub Docs: Tracking Copilot sessions](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/coding-agent/track-copilot-sessions)
 - [Claude Code: .claude directory](https://code.claude.com/docs/en/claude-directory)
+- [Claude Code: Monitoring & Usage (Official OTel docs)](https://code.claude.com/docs/en/monitoring-usage)
 - [Claude Code: VS Code extension](https://code.claude.com/docs/en/vs-code)
 - [OpenAI Codex CLI](https://developers.openai.com/codex/cli)
 - [OpenAI Codex config](https://developers.openai.com/codex/config-basic)
@@ -932,8 +1103,13 @@ Key: ●●● = rich data / ●●○ = moderate / ●○○ = minimal / ○○
 - [DeepWiki: Copilot CLI session state & lifecycle](https://deepwiki.com/github/copilot-cli/6.2-session-state-and-lifecycle-management)
 - [DeepWiki: Copilot CLI session management & history](https://deepwiki.com/github/copilot-cli/3.3-session-management-and-history)
 - [Monad: Detection engineering for Claude Code](https://www.monad.com/blog/detection-engineering-for-claude-code-part-1)
+- [BindPlane: Claude Code Per-Session Cost and Token Tracking](https://bindplane.com/blog/claude-code-opentelemetry-per-session-cost-and-token-tracking)
+- [SigNoz: Claude Code Monitoring with OpenTelemetry](https://signoz.io/blog/claude-code-monitoring-with-opentelemetry/)
+- [Monitoring Claude Code with OpenTelemetry and Grafana](https://claude-blog.setec.rs/blog/claude-code-grafana-monitoring)
 - [Gemini CLI session management](https://geminicli.com/docs/cli/session-management/)
 - [NoBoxDev: Process-tree agent detection](https://noboxdev.com/blog/process-tree-agent-detection)
+- [OpenTelemetry OTLP Receiver Guide](https://www.dash0.com/guides/opentelemetry-otlp-receiver)
+- [Baeldung: Working with OpenTelemetry Collector](https://www.baeldung.com/java-opentelemetry-collector)
 
 ### Community & Analysis
 - [GridWatch: Copilot session dashboard](https://www.faesel.com/blog/gridwatch-copilot-session-manager)

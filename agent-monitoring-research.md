@@ -21,8 +21,6 @@ This document explains, step by step, how agent-pulse can detect and monitor run
    - [GitHub Copilot in IntelliJ](#github-copilot-in-intellij)
    - [Claude Code in VS Code](#claude-code-in-vs-code)
    - [Cursor IDE](#cursor-ide)
-   - [Windsurf / Codeium IDE](#windsurf--codeium-ide)
-   - [Aider](#aider)
 6. [How OSHI Enables Process Detection on the JVM](#how-oshi-enables-process-detection-on-the-jvm)
 7. [File System Watching Strategy](#file-system-watching-strategy)
 8. [Combining Detection Layers](#combining-detection-layers)
@@ -67,8 +65,6 @@ Each AI agent runs as one or more OS processes with distinctive names, paths, or
 | **Codex CLI** | `codex` | Binary path or `codex` / `codex-tui` | [OpenAI Codex docs](https://developers.openai.com/codex/cli) |
 | **Gemini CLI** | `gemini` | Binary path or `gemini` command | [Gemini CLI docs](https://github.com/google-gemini/gemini-cli) |
 | **Cursor IDE** | `Cursor`, `Cursor Helper` | Electron app bundle | [Cursor docs](https://cursor.com/docs/agent/overview) |
-| **Windsurf IDE** | `Windsurf`, `windsurf` | Electron/Codeium app bundle | [Windsurf docs](https://docs.windsurf.com/) |
-| **Aider** | `aider` | Python process, `aider` in args | [Aider docs](https://aider.chat/docs/) |
 
 ### Real-World Process Evidence
 
@@ -138,9 +134,7 @@ Each agent stores session state in predictable directories under the user's home
 | **Claude Code** | `~/.claude/` | `projects/<hash>/memory/`, `debug/` | Session activity, memory updates |
 | **Codex CLI** | `~/.codex/sessions/` | `YYYY/MM/DD/rollout-*.jsonl` | New rollout = new session; writes = active session |
 | **Gemini CLI** | `~/.gemini/tmp/` | `<project_hash>/chats/` | Chat files created/modified during sessions |
-| **Aider** | `<project>/.aider/` | `sessions/*.json` | Session saves/loads (in session-enabled builds) |
 | **Cursor** | `<project>/.cursor/` | `checkpoints/`, `logs/` | Agent activity, state snapshots |
-| **Windsurf** | `<project>/.windsurf/` | `session.json`, `cache/` | Cascade agent activity |
 
 ### The Lock File Pattern (Copilot CLI Deep Dive)
 
@@ -465,54 +459,6 @@ Source: [Cursor docs](https://cursor.com/docs/agent/overview), [Cursor architect
 
 ---
 
-### Windsurf / Codeium IDE
-
-**Environment**: Standalone IDE (Electron-based, VS Code fork)
-
-**Detection method**: Process scanning (primary) + file watching (secondary)
-
-**Step-by-step detection:**
-
-1. Scan for processes named `Windsurf` or `windsurf` using OSHI
-2. Watch for `.windsurf/` directories in known project paths
-3. `~/.codeium/windsurf/memories/` contains global agent memories
-4. Per-project `.windsurf/rules/` and `.windsurf/session.json` indicate active configuration
-
-**Process signature:**
-- Name: `Windsurf`, `windsurf`
-- Electron/Codeium app bundle
-
-**Confidence level**: Medium — similar challenges to Cursor (project-local state).
-
-Source: [Windsurf docs](https://docs.windsurf.com/), [Windsurf context management](https://iceberglakehouse.com/posts/2026-03-context-windsurf/)
-
----
-
-### Aider
-
-**Environment**: Terminal (Python-based)
-
-**Detection method**: Process scanning (primary)
-
-**Step-by-step detection:**
-
-1. Scan for processes named `aider` or with `aider` in command-line arguments
-2. Aider is a Python process; the process name may show as `python` with `aider` in args
-3. Session state (in session-enabled builds) is stored in `<project>/.aider/sessions/`
-4. Chat history options: `--chat-history-file`, `--restore-chat-history`
-
-**Process signature:**
-- Name: `aider` (or `python3` with `aider` in args)
-- Python process
-
-**Challenge**: Aider's session management is evolving and not yet standardized. Mainline aider has ephemeral sessions; forked/extended versions add persistence. Detection relies primarily on process scanning.
-
-**Confidence level**: Medium — Python process may require command-line argument inspection for reliable identification.
-
-Source: [Aider docs](https://aider.chat/docs/), [Aider session management](https://lorbic.com/aider-session-management/), [Aider options reference](https://aider.chat/docs/config/options.html)
-
----
-
 ## How OSHI Enables Process Detection on the JVM
 
 [OSHI](https://github.com/oshi/oshi) (Operating System and Hardware Information) is a pure-Java library that provides cross-platform access to OS-level process information without JNI or native dependencies.
@@ -554,7 +500,7 @@ val proc: OSProcess? = os.getProcess(3251)
 EVERY 2 SECONDS (or on file watch trigger):
   1. Get all processes from OSHI
   2. For each process, check against known agent signatures:
-     - Match process name against known names (copilot, claude, codex, gemini, aider, ...)
+     - Match process name against known names (copilot, claude, codex, gemini, cursor, ...)
      - If name matches, inspect path and command-line for confirmation
      - Walk parent process tree to identify IDE context (VS Code, IntelliJ, Cursor, ...)
   3. For each matched agent process:
@@ -595,10 +541,10 @@ agent-pulse registers the following directories with JBR's native FSEvents Watch
 
 ### Why Not Watch Project-Level Directories?
 
-Agents like Cursor (`.cursor/`) and Windsurf (`.windsurf/`) store state in project directories. Watching these would require knowing all active project paths upfront. Instead, agent-pulse:
+Cursor (`.cursor/`) stores state in project directories rather than a centralized home-directory location. Watching these would require knowing all active project paths upfront. Instead, agent-pulse:
 
-1. **Discovers projects via process scanning**: When a Cursor/Windsurf process is found, extract the working directory from the process command line or `/proc/<PID>/cwd` equivalent
-2. **Dynamically registers watches**: Add the discovered project's `.cursor/` or `.windsurf/` directory to the watch list
+1. **Discovers projects via process scanning**: When a Cursor process is found, extract the working directory from the process command line or `/proc/<PID>/cwd` equivalent
+2. **Dynamically registers watches**: Add the discovered project's `.cursor/` directory to the watch list
 3. **Removes watches**: When the process exits, unregister the project-level watch
 
 This hybrid approach avoids watching the entire filesystem while still catching project-local state changes.
@@ -680,8 +626,6 @@ This hybrid approach avoids watching the entire filesystem while still catching 
 | **Codex CLI** | High (distinctive process name) | Medium (rollout files, no locks) | **High** |
 | **Gemini CLI** | High (distinctive process name) | Medium (chat files) | **High** |
 | **Cursor IDE** | High (distinctive app name) | Low (project-local, requires discovery) | **Medium-High** |
-| **Windsurf IDE** | High (distinctive app name) | Low (project-local, requires discovery) | **Medium-High** |
-| **Aider** | Medium (Python process, need arg check) | Low (ephemeral by default) | **Medium** |
 
 ---
 
@@ -697,8 +641,6 @@ This hybrid approach avoids watching the entire filesystem while still catching 
 - [Gemini CLI GitHub](https://github.com/google-gemini/gemini-cli)
 - [Gemini CLI config](https://github.com/google-gemini/gemini-cli/blob/main/docs/reference/configuration.md)
 - [Cursor docs: Agent overview](https://cursor.com/docs/agent/overview)
-- [Windsurf docs](https://docs.windsurf.com/)
-- [Aider docs](https://aider.chat/docs/)
 - [OSHI GitHub](https://github.com/oshi/oshi)
 - [OSHI OSProcess API](https://www.oshi.ooo/oshi-core-java11/apidocs/com.github.oshi/oshi/software/os/OSProcess.html)
 
@@ -711,8 +653,6 @@ This hybrid approach avoids watching the entire filesystem while still catching 
 
 ### Community & Analysis
 - [GridWatch: Copilot session dashboard](https://www.faesel.com/blog/gridwatch-copilot-session-manager)
-- [Lorbic: Aider session management](https://lorbic.com/aider-session-management/)
-- [Windsurf context management](https://iceberglakehouse.com/posts/2026-03-context-windsurf/)
 - [Cursor architecture deep dive](https://collabnix.com/cursor-ai-deep-dive-technical-architecture-advanced-features-best-practices-2025/)
 
 ### JetBrains & IDE Integration

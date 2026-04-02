@@ -77,11 +77,20 @@ jobs:
         run: ./gradlew --no-daemon build sonar
 
       - name: Analyze with SonarCloud GitHub Action
+        id: sonar_fallback
         if: ${{ steps.precheck.outputs.has_gradle != 'true' && steps.precheck.outputs.has_token == 'true' && steps.precheck.outputs.has_sonar_properties == 'true' }}
         uses: SonarSource/sonarcloud-github-action@v3.1.0
+        continue-on-error: true
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Warn when fallback scan fails
+        if: ${{ steps.sonar_fallback.outcome == 'failure' }}
+        run: |
+          echo "Fallback SonarCloud scan failed."
+          echo "This can happen before the Gradle-based analysis path is available."
+          echo "The workflow remains non-blocking for now; once Gradle scaffold is present, ./gradlew build sonar will be the primary path."
 
       - name: Skip when no analysis path is available
         if: ${{ steps.precheck.outputs.has_token == 'true' && steps.precheck.outputs.has_gradle != 'true' && steps.precheck.outputs.has_sonar_properties != 'true' }}

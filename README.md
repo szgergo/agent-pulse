@@ -10,6 +10,8 @@ The workflow supports two analysis paths:
 - otherwise, it uses `sonar-project.properties` with the SonarCloud scan action
 - if the `SONAR_TOKEN` secret is missing, it skips with an explanatory message
 
+Note: the fallback scan path is currently configured as non-blocking while the repository is still pre-scaffold; the Gradle path becomes the primary enforced analysis once the Kotlin/Gradle project is in place.
+
 Current repository prerequisites:
 
 1. create/import the `szgergo/agent-pulse` project in SonarCloud

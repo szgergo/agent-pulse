@@ -24,7 +24,8 @@ This document explains, step by step, how agent-pulse can detect and monitor run
 6. [How OSHI Enables Process Detection on the JVM](#how-oshi-enables-process-detection-on-the-jvm)
 7. [File System Watching Strategy](#file-system-watching-strategy)
 8. [Combining Detection Layers](#combining-detection-layers)
-9. [Sources](#sources)
+9. [Extractable Information per Agent](#extractable-information-per-agent)
+10. [Sources](#sources)
 
 ---
 
@@ -626,6 +627,289 @@ This hybrid approach avoids watching the entire filesystem while still catching 
 | **Codex CLI** | High (distinctive process name) | Medium (rollout files, no locks) | **High** |
 | **Gemini CLI** | High (distinctive process name) | Medium (chat files) | **High** |
 | **Cursor IDE** | High (distinctive app name) | Low (project-local, requires discovery) | **Medium-High** |
+
+---
+
+## Extractable Information per Agent
+
+This section documents, for each agent we support, exactly **what information agent-pulse can display in the dashboard** given the detection methods described above. This is based on real file artifacts inspected from a live system, official documentation, and process metadata available via OSHI.
+
+### Information Categories
+
+| Category | Description | Source |
+|---|---|---|
+| **Identity** | Which agent, which version, session ID | Process scanning + file metadata |
+| **Context** | Working directory, project name, git branch | File metadata (workspace.yaml, etc.) |
+| **Activity** | What the agent is doing right now, last user message | events.jsonl, process liveness |
+| **Resource Usage** | CPU, memory, process uptime | OSHI process metrics |
+| **Token Metrics** | Input/output tokens, model used, cost tier | events.jsonl shutdown/model events |
+| **Code Impact** | Lines added/removed, files modified | events.jsonl shutdown events |
+| **Session History** | Conversation turns, tool calls, compactions | events.jsonl event stream |
+| **Lifecycle** | Start time, resume count, idle duration | Lock files + events.jsonl |
+
+### GitHub Copilot CLI
+
+**Richest data source of all agents.** Copilot CLI writes a structured `events.jsonl` log with every interaction, plus YAML and JSON metadata files. This was verified from a live system with 18 sessions.
+
+| Data Point | Source File | How to Extract | Example Value |
+|---|---|---|---|
+| Session ID | `workspace.yaml` | `id` field | `b8c53b29-32f8-4f6d-a06b-81fa66c68072` |
+| Working directory | `workspace.yaml` | `cwd` field | `/Users/gergoszabo/Documents/Projects/agent-pulse` |
+| Git root | `workspace.yaml` | `git_root` field | `/Users/gergoszabo/Documents/Projects/agent-pulse` |
+| Git branch | `workspace.yaml` | `branch` field | `main` |
+| Session summary | `workspace.yaml` | `summary` field (auto-generated) | `"Initialize Gh Copilot CLI IntelliJ Repo"` |
+| Session created at | `workspace.yaml` | `created_at` ISO timestamp | `2026-04-01T20:59:41.335Z` |
+| Session updated at | `workspace.yaml` | `updated_at` ISO timestamp | `2026-04-02T11:31:53.332Z` |
+| Active PIDs | `inuse.<PID>.lock` | Filename pattern | `3251`, `84295` |
+| VS Code workspace | `vscode.metadata.json` | `workspaceFolder.folderPath` | `/Users/gergoszabo/Documents/Projects` |
+| First user message | `vscode.metadata.json` | `firstUserMessage` | `"create a directory and git init that..."` |
+| Copilot version | `events.jsonl` | `session.start` → `copilotVersion` | `1.0.14` |
+| Current model | `events.jsonl` | `session.model_change` → `newModel` | `claude-opus-4.6` |
+| Reasoning effort | `events.jsonl` | `session.model_change` → `reasoningEffort` | `high` |
+| Agent mode | `events.jsonl` | `user.message` → `agentMode` | `plan`, `interactive` |
+| Total premium requests | `events.jsonl` | `session.shutdown` → `totalPremiumRequests` | `21` |
+| Total API duration | `events.jsonl` | `session.shutdown` → `totalApiDurationMs` | `1,239,460 ms` |
+| Lines added | `events.jsonl` | `session.shutdown` → `codeChanges.linesAdded` | `488` |
+| Lines removed | `events.jsonl` | `session.shutdown` → `codeChanges.linesRemoved` | `289` |
+| Files modified | `events.jsonl` | `session.shutdown` → `codeChanges.filesModified` | List of absolute paths |
+| Token usage per model | `events.jsonl` | `session.shutdown` → `modelMetrics` | `inputTokens: 5,726,932, outputTokens: 71,216` |
+| Current token window | `events.jsonl` | `session.shutdown` → `currentTokens` | `80,042` |
+| System/conversation/tool tokens | `events.jsonl` | `session.shutdown` breakdown | `system: 7,869, conversation: 52,257, tools: 19,912` |
+| Resume count | `events.jsonl` | Count `session.resume` events | `15` |
+| Compaction count | `events.jsonl` | Count `session.compaction_complete` | `6` |
+| Subagent usage | `events.jsonl` | `subagent.started/completed` events | Model, tool calls, tokens, duration per subagent |
+| Tool call count | `events.jsonl` | Count `tool.execution_start` events | `652` in current session |
+| User message count | `events.jsonl` | Count `user.message` events | `30` in current session |
+| CPU usage | OSHI | `OSProcess.processCpuLoadCumulative` | Real-time percentage |
+| Memory usage | OSHI | `OSProcess.residentSetSize` | Bytes (e.g., 740 MB) |
+| Process uptime | OSHI | `OSProcess.startTime` vs now | Duration since process started |
+
+**Event types found in events.jsonl** (from a real session with 2,517 events):
+
+| Event Type | Count | Contains |
+|---|---|---|
+| `tool.execution_start` | 652 | Tool name, arguments |
+| `tool.execution_complete` | 649 | Success/failure, result summary, token telemetry |
+| `assistant.message` | 397 | Assistant response content |
+| `assistant.turn_start` | 340 | Turn ID, interaction ID |
+| `assistant.turn_end` | 338 | Turn ID |
+| `session.plan_changed` | 43 | Plan content updates |
+| `user.message` | 30 | User message content, attachments, agent mode |
+| `session.resume` | 15 | Resume time, event count, selected model |
+| `session.shutdown` | 12 | Full session metrics (tokens, cost, code changes) |
+| `session.compaction_start` | 9 | Token counts before compaction |
+| `subagent.started` | 7 | Agent type, description |
+| `subagent.completed` | 7 | Model, total tool calls, total tokens, duration |
+| `system.notification` | 6 | System events |
+| `session.compaction_complete` | 6 | Pre-compaction tokens, checkpoint path |
+| `session.mode_changed` | 5 | Previous/new mode (plan, interactive) |
+| `session.start` | 1 | Session ID, version, start time, CWD |
+| `session.model_change` | 1 | Previous/new model, reasoning effort |
+
+**What agent-pulse can display for Copilot CLI:**
+- Real-time: active/idle status, current model, agent mode, CPU/memory, working directory, git branch
+- Session: summary, first message, resume count, compaction count, total turns
+- Cumulative: total tokens (in/out per model), premium requests, API duration, lines added/removed, files modified
+- History: full conversation timeline from events.jsonl
+
+---
+
+### GitHub Copilot in VS Code
+
+Same data as Copilot CLI (identical `events.jsonl`, `workspace.yaml`, lock files), **plus** VS Code-specific metadata.
+
+| Data Point | Source File | How to Extract | Unique to VS Code |
+|---|---|---|---|
+| All Copilot CLI fields | (same as above) | (same as above) | No |
+| VS Code workspace folder | `vscode.metadata.json` | `workspaceFolder.folderPath` | Yes |
+| VS Code request IDs | `vscode.requests.metadata.json` | Array of `{vscodeRequestId, copilotRequestId}` | Yes |
+| Tool edit mappings | `vscode.requests.metadata.json` | `toolIdEditMap` per request | Yes |
+| IDE identification | Process tree (OSHI) | Parent is `Code Helper (Plugin)` | Yes |
+
+**What agent-pulse can display additionally for VS Code sessions:**
+- IDE badge: "VS Code" indicator (distinguishing from pure CLI)
+- Workspace folder (may differ from CWD if session was started in a different project)
+- Per-request VS Code integration tracking
+
+---
+
+### GitHub Copilot in IntelliJ
+
+**Least data available.** IntelliJ's Copilot runs as `copilot-language-server` with no external session state files. Information is limited to what OSHI can extract from the process.
+
+| Data Point | Source | How to Extract | Available |
+|---|---|---|---|
+| Process name | OSHI | `copilot-language-server` | Yes |
+| IntelliJ plugin path | OSHI | Path contains `github-copilot-intellij/copilot-agent/native/` | Yes |
+| Platform/architecture | OSHI | Path contains `darwin-arm64`, `linux-amd64`, etc. | Yes |
+| Protocol mode | OSHI | `--stdio` (LSP) or `--acp` flag in command line | Yes |
+| Language server version | OSHI | Version in npx path (e.g., `@1.460.0`) for ACP | Partial |
+| Parent IDE process | OSHI | `getParentProcessID()` → IntelliJ JVM | Yes |
+| CPU usage | OSHI | `processCpuLoadCumulative` | Yes |
+| Memory usage | OSHI | `residentSetSize` | Yes |
+| Process uptime | OSHI | `startTime` | Yes |
+| Working directory | OSHI | Process CWD (if available) | Platform-dependent |
+| Session content | None | Not accessible externally | No |
+| Token usage | None | Not accessible externally | No |
+| Conversation history | None | Not accessible externally | No |
+
+**What agent-pulse can display for IntelliJ Copilot:**
+- Real-time: active status, CPU/memory, protocol mode (LSP vs ACP), uptime
+- Context: parent IDE identification, platform/architecture
+- Limitation: no session content, tokens, or conversation — just "Copilot is running in IntelliJ"
+
+---
+
+### Claude Code CLI
+
+Claude Code stores less structured session data than Copilot CLI. Its primary file artifacts are project memories and debug logs, not per-session event streams.
+
+| Data Point | Source | How to Extract | Available |
+|---|---|---|---|
+| Process name | OSHI | `claude` | Yes |
+| CPU/memory usage | OSHI | Standard OSHI metrics | Yes |
+| Process uptime | OSHI | `startTime` | Yes |
+| Working directory | OSHI | Process CWD | Yes |
+| Project memory | `~/.claude/projects/<hash>/memory/MEMORY.md` | Read markdown file | Yes |
+| Debug logs | `~/.claude/debug/<uuid>.txt` | Timestamped debug entries | Yes |
+| Plugin config | `~/.claude/plugins/blocklist.json` | JSON | Yes |
+| Config backups | `~/.claude/backups/` | Timestamped backup files | Yes |
+| Global instructions | `~/.claude/CLAUDE.md` | Read markdown | Yes (if exists) |
+| Project instructions | `<project>/.claude/settings.json` | JSON with permissions, tool config | Yes (if exists) |
+| OpenTelemetry events | OTLP export (if configured) | Structured spans and events | Conditional |
+| Session ID | None externally | Not written to predictable file | No |
+| Token usage | None externally | Not in file artifacts | No |
+| Conversation content | None externally | Not persisted to accessible files | No |
+
+**OpenTelemetry integration** (if Claude Code is configured with OTLP export):
+
+Claude Code can emit structured telemetry including:
+- Session start/stop events
+- Tool execution attempts (with accept/reject decisions)
+- Prompts submitted
+- API requests made
+- Subagent and MCP tool usage
+
+This requires the user to configure OTLP export in Claude Code settings. agent-pulse could optionally consume this stream if available.
+
+Source: [Monad: Detection engineering for Claude Code](https://www.monad.com/blog/detection-engineering-for-claude-code-part-1)
+
+**What agent-pulse can display for Claude Code:**
+- Real-time: active status, CPU/memory, working directory
+- Context: project memory content (MEMORY.md), configured instructions
+- Limitation: no token metrics, conversation content, or session IDs from file artifacts alone
+- Future: OpenTelemetry integration could provide rich session data if configured
+
+---
+
+### Claude Code in VS Code
+
+Same data as Claude Code CLI. The VS Code extension is a bridge to the CLI process.
+
+| Data Point | Source | Unique to VS Code |
+|---|---|---|
+| All Claude Code CLI fields | (same as above) | No |
+| IDE identification | Process tree (OSHI) | Yes — parent is VS Code extension host |
+
+**What agent-pulse can display additionally:**
+- IDE badge: "VS Code" indicator on the Claude Code session
+
+---
+
+### OpenAI Codex CLI
+
+Codex CLI writes structured JSONL rollout transcripts per session, providing moderate visibility.
+
+| Data Point | Source | How to Extract | Available |
+|---|---|---|---|
+| Process name | OSHI | `codex` or `codex-tui` | Yes |
+| CPU/memory usage | OSHI | Standard OSHI metrics | Yes |
+| Process uptime | OSHI | `startTime` | Yes |
+| Working directory | OSHI | Process CWD | Yes |
+| Session transcript | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | JSONL per session | Yes |
+| Commands executed | Rollout JSONL | Parse command invocation entries | Yes |
+| Files changed | Rollout JSONL | Parse file edit entries | Yes |
+| Model responses | Rollout JSONL | Parse model response entries | Yes |
+| Global history | `~/.codex/history.jsonl` | JSONL of all commands/sessions | Yes |
+| Configuration | `~/.codex/config.toml` | Model, sandbox policy, approval settings | Yes |
+| Global instructions | `~/.codex/AGENTS.md` | Read markdown | Yes (if exists) |
+| TUI logs | `~/.codex/logs/codex-tui.log` | Timestamped log entries | Yes |
+| Token usage | Rollout JSONL | Parse token counts from response metadata | Partial |
+
+**What agent-pulse can display for Codex CLI:**
+- Real-time: active status, CPU/memory, working directory
+- Session: rollout transcript (commands, file changes, model responses), configured model
+- Configuration: sandbox policy, auto-approve settings, custom instructions
+- History: global command history across sessions
+
+---
+
+### Google Gemini CLI
+
+Gemini CLI stores per-project chat histories and configuration with moderate detail.
+
+| Data Point | Source | How to Extract | Available |
+|---|---|---|---|
+| Process name | OSHI | `gemini` | Yes |
+| CPU/memory usage | OSHI | Standard OSHI metrics | Yes |
+| Process uptime | OSHI | `startTime` | Yes |
+| Working directory | OSHI | Process CWD | Yes |
+| Chat history (per project) | `~/.gemini/tmp/<project_hash>/chats/` | Chat log files | Yes |
+| Configuration | `~/.gemini/settings.json` | Model, theme, MCP servers | Yes |
+| Shell history | `~/.gemini/shell_history` | Text file of CLI inputs | Yes |
+| Global instructions | `~/.gemini/GEMINI.md` | Read markdown | Yes (if exists) |
+| Extensions | `~/.gemini/extensions/` | Installed CLI extensions | Yes |
+| Token usage | Chat log files | Parse token stats from chat entries | Partial |
+
+**What agent-pulse can display for Gemini CLI:**
+- Real-time: active status, CPU/memory, working directory
+- Session: chat history for the current project
+- Configuration: selected model, MCP server connections, custom instructions
+- History: shell command history, per-project chat archives
+
+---
+
+### Cursor IDE
+
+Cursor stores agent checkpoints and logs per-project, providing moderate visibility once the project is discovered.
+
+| Data Point | Source | How to Extract | Available |
+|---|---|---|---|
+| Process name | OSHI | `Cursor`, `Cursor Helper` | Yes |
+| CPU/memory usage | OSHI | Standard OSHI metrics | Yes |
+| Process uptime | OSHI | `startTime` | Yes |
+| Working directory | OSHI | Process CWD or window title heuristics | Yes |
+| Agent checkpoints | `<project>/.cursor/checkpoints/` | Versioned state snapshots | Yes (per project) |
+| Agent logs | `<project>/.cursor/logs/` | Timestamped action logs | Yes (per project) |
+| Ignore rules | `<project>/.cursorignore` | Text file | Yes |
+| Agent rules | `<project>/.cursorrules` | Text file | Yes (if exists) |
+| Indexing config | `<project>/.cursorindexingignore` | Text file | Yes |
+| Session content | Internal to Cursor app | Not in accessible file format | No |
+| Token usage | Internal to Cursor app | Not in accessible file format | No |
+
+**What agent-pulse can display for Cursor:**
+- Real-time: active status, CPU/memory, working directory
+- Context: configured rules, ignore patterns, checkpoint count
+- Limitation: no conversation content or token metrics from external files — agent-pulse can only show "Cursor is active on project X with Y checkpoints"
+
+---
+
+### Summary: Data Richness by Agent
+
+| Agent | Identity | Context | Activity | Tokens | Code Impact | Conversation | Overall Richness |
+|---|---|---|---|---|---|---|---|
+| **Copilot CLI** | ●●● | ●●● | ●●● | ●●● | ●●● | ●●● | **Excellent** |
+| **Copilot VS Code** | ●●● | ●●● | ●●● | ●●● | ●●● | ●●● | **Excellent** |
+| **Copilot IntelliJ** | ●●○ | ●○○ | ●○○ | ○○○ | ○○○ | ○○○ | **Limited** |
+| **Claude Code CLI** | ●●○ | ●●○ | ●○○ | ○○○ | ○○○ | ○○○ | **Basic** |
+| **Claude Code VS Code** | ●●○ | ●●○ | ●○○ | ○○○ | ○○○ | ○○○ | **Basic** |
+| **Codex CLI** | ●●○ | ●●○ | ●●○ | ●○○ | ●●○ | ●●○ | **Good** |
+| **Gemini CLI** | ●●○ | ●●○ | ●●○ | ●○○ | ○○○ | ●●○ | **Good** |
+| **Cursor IDE** | ●●○ | ●●○ | ●○○ | ○○○ | ○○○ | ○○○ | **Basic** |
+
+Key: ●●● = rich data / ●●○ = moderate / ●○○ = minimal / ○○○ = not available
+
+**Key takeaway:** GitHub Copilot CLI provides by far the richest external monitoring data thanks to its structured `events.jsonl` log and metadata files. Codex and Gemini offer good session transcripts. Claude Code and Cursor provide mainly process-level data unless OpenTelemetry or internal APIs become available.
 
 ---
 

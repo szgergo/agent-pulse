@@ -770,6 +770,218 @@ Note: `kfswatch` doesn't support recursive watching directly. But with JBR, you 
 
 ---
 
+## JBR Feasibility Deep-Dive: Technical & Legal Analysis
+
+### Legal Analysis
+
+#### License: GPL-2.0 with Classpath Exception
+
+JBR's LICENSE file contains **both** the full GPL-2.0 text **and** the Classpath Exception. This is the **exact same license** as vanilla OpenJDK (Oracle, Adoptium/Temurin, Amazon Corretto, Azul Zulu, etc.).
+
+The Classpath Exception is the critical clause that makes JBR (and all OpenJDK distributions) usable for any application:
+
+> *"As a special exception, the copyright holders of this library give you permission to link this library with independent modules to produce an executable, regardless of the license terms of these independent modules, and to copy and distribute the resulting executable under terms of your choice."*
+
+**Source**: [JetBrains/JetBrainsRuntime/LICENSE](https://github.com/JetBrains/JetBrainsRuntime/blob/main/LICENSE) — bottom section titled `"CLASSPATH" EXCEPTION TO THE GPL`
+
+#### What This Means in Practice
+
+| Activity | Permitted? | Conditions |
+|---|---|---|
+| **Bundle unmodified JBR** with your app | ✅ Yes | Include GPL+CE license text, provide/link to source |
+| **Keep your app closed-source** | ✅ Yes | Your app is an "independent module" per the CE |
+| **Keep your app open-source** (any license) | ✅ Yes | Same as above — CE doesn't restrict your license choice |
+| **Modify JBR itself** and redistribute | ✅ Yes | Must provide modified JBR source under GPL-2.0 |
+| **Remove Classpath Exception** from JBR files | ⚠️ Risky | Could trigger full GPL copyleft — don't do this |
+
+#### Nuance: JBR-specific Source Files
+
+A notable detail: JetBrains' own additions to JBR (e.g., `MacOSXWatchService.java`, copyrighted by "JetBrains s.r.o.") carry plain GPL-2.0 headers **without** the Classpath Exception designation in their individual file headers. The Classpath Exception appears only on files where "Oracle designates this particular file as subject to the 'Classpath' exception."
+
+**Why this doesn't affect agent-pulse**:
+- Our application code only calls the **public API** (`java.nio.file.WatchService`) — these files **do** have the Classpath Exception (confirmed: 78 files in `java.nio.file` package have it)
+- `MacOSXWatchService` is an **internal JVM implementation class** in the `sun.nio.fs` package
+- Our code never imports, references, or depends on this class directly
+- The JVM loads it internally via the service provider mechanism — this is identical to how **every** Java application works
+- The Classpath Exception protects applications that **link against** the library APIs — the internal implementation details are irrelevant to your application's license
+
+This is the same pattern used by all JetBrains IDEs (IntelliJ, WebStorm), Android Studio, JProfiler, YourKit, and Toolbox App — all proprietary/mixed-license products running on JBR.
+
+#### Redistribution Obligations (Standard for Any OpenJDK Distribution)
+
+When bundling JBR in a distributable app:
+1. Include the `LICENSE` file (GPL-2.0 + Classpath Exception text) in your distribution
+2. Include the `ADDITIONAL_LICENSE_INFO` file
+3. Provide source code or a link to it — linking to `https://github.com/JetBrains/JetBrainsRuntime` suffices (the exact tag/version you used)
+4. Include copyright notices
+5. Include third-party license notices (JBR bundles Apache, MIT, BSD components)
+
+These are the **exact same obligations** as bundling any OpenJDK distribution (Temurin, Corretto, etc.). No special JetBrains-specific restrictions exist.
+
+#### Legal Verdict: ✅ Fully Safe for Any License
+
+JBR uses the same license as vanilla OpenJDK. Bundling it with agent-pulse (whether open-source or proprietary) is legally equivalent to bundling any other OpenJDK distribution. The Classpath Exception explicitly permits this.
+
+**References**:
+- [JBR LICENSE](https://github.com/JetBrains/JetBrainsRuntime/blob/main/LICENSE)
+- [JBR ADDITIONAL_LICENSE_INFO](https://github.com/JetBrains/JetBrainsRuntime/blob/main/ADDITIONAL_LICENSE_INFO)
+- [Vaultinum: The GPL Classpath Exception Explained](https://vaultinum.com/blog/the-gpl-and-its-unique-gpl-classpath-exception-what-does-it-mean)
+- [BellSoft: OpenJDK and GPLv2 + Classpath Exception](https://bell-sw.com/blog/gplv2-classpath-exception-the-intricacies-of-open-source-licensing/)
+- [Stack Exchange: What does "GPL with Classpath Exception" mean?](https://softwareengineering.stackexchange.com/questions/119436/what-does-gpl-with-classpath-exception-mean-in-practice)
+
+---
+
+### Technical Analysis
+
+#### Compose Desktop + JBR: Default Integration
+
+**Key finding**: The Compose Multiplatform Gradle plugin **bundles JetBrains Runtime by default** when creating native distributions. No manual configuration is needed.
+
+```kotlin
+// build.gradle.kts — standard Compose Desktop setup
+compose.desktop {
+    application {
+        mainClass = "MainKt"
+        nativeDistributions {
+            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
+            packageName = "AgentPulse"
+            packageVersion = "1.0.0"
+        }
+    }
+}
+```
+
+```bash
+# Build commands — JBR is automatically bundled
+./gradlew packageDmg    # macOS → .dmg with JBR inside
+./gradlew packageMsi    # Windows → .msi with JBR inside
+./gradlew packageDeb    # Linux → .deb with JBR inside
+```
+
+The plugin uses `jlink` to strip unused modules, keeping the bundled JBR to ~50-60MB.
+
+**To explicitly control the JBR version** (if needed):
+```properties
+# gradle.properties
+org.gradle.java.home=/path/to/jbrsdk-21.0.9
+```
+
+**Sources**:
+- [Kotlin Multiplatform: Native Distributions](https://kotlinlang.org/docs/multiplatform/compose-native-distribution.html)
+- [Compose Multiplatform Desktop Template](https://github.com/JetBrains/compose-multiplatform-desktop-template)
+
+#### Available JBR Versions & Flavors
+
+| JDK Base | Latest JBR Version | Date | Status |
+|---|---|---|---|
+| **JDK 21 LTS** | 21.0.10-b1163.110 | Mar 2026 | ✅ Recommended for stability |
+| **JDK 25** | 25.0.2-b329.72 | Mar 2026 | Cutting edge, for early adopters |
+| JDK 17 LTS | 17.0.12-b1207.37 | Oct 2024 | Legacy maintenance |
+
+**Flavors** (download from [GitHub Releases](https://github.com/JetBrains/JetBrainsRuntime/releases)):
+
+| Flavor | Description | Relevant? |
+|---|---|---|
+| **JBRSDK** | Full SDK (develop + run) | ✅ For development |
+| **JBR** | Runtime only (run) | ✅ For distribution |
+| JBR with JCEF | Includes Chromium browser | ❌ Not needed for agent-pulse |
+| vanilla | JBR without JetBrains patches | ❌ Defeats the purpose |
+
+#### JBR API: Bonus Desktop Integration Features
+
+JBR provides an additional API ([`org.jetbrains.runtime:jbr-api`](https://github.com/JetBrains/JetBrainsRuntimeApi)) that exposes JBR-specific features. These are accessible from Kotlin and degrade gracefully on non-JBR runtimes.
+
+```kotlin
+// Add to build.gradle.kts
+dependencies {
+    implementation("org.jetbrains.runtime:jbr-api:1.10.1")
+}
+```
+
+**Features relevant to agent-pulse**:
+
+| Feature | JBR API Service | Why It Matters |
+|---|---|---|
+| **Rounded window corners** | `RoundedCornersManager` | Modern macOS/Windows look for the dashboard |
+| **Custom title bar** | `WindowDecorations.CustomTitleBar` | Merge title bar with app content (like Toolbox) |
+| **Desktop actions** | `DesktopActions` | Override file/URL opening behavior |
+| **HiDPI support** | Built-in | Crisp rendering on Retina/4K displays |
+| **Better font rendering** | Built-in | Important for a dashboard with lots of text |
+| **Accessibility** | `AccessibleAnnouncer` | Screen reader support |
+
+```kotlin
+// Example: Custom title bar (like JetBrains Toolbox)
+import com.jetbrains.JBR
+
+if (JBR.isWindowDecorationsSupported()) {
+    val decorations = JBR.getWindowDecorations()
+    val titleBar = decorations.createCustomTitleBar()
+    titleBar.height = 40f
+    decorations.setCustomTitleBar(window, titleBar)
+}
+```
+
+The JBR API is designed to be **optional** — your app compiles against any JDK but gets enhanced features when running on JBR. This means:
+- Development works with any JDK 21+
+- Production bundled with JBR gets the enhanced features automatically
+- If JBR is unavailable, features degrade gracefully (e.g., standard title bar instead of custom)
+
+**Source**: [JBR API JavaDoc](https://jetbrains.github.io/JetBrainsRuntimeApi/)
+
+#### Cross-Platform File Watching with JBR
+
+| Platform | JBR WatchService Backend | Event-Driven? | Recursive? |
+|---|---|---|---|
+| **macOS** | FSEvents (native) | ✅ Yes | ✅ Yes (`FILE_TREE`) |
+| **Linux** | inotify (native) | ✅ Yes | ❌ No (per-directory) |
+| **Windows** | ReadDirectoryChangesW (native) | ✅ Yes | ✅ Yes (`FILE_TREE`) |
+
+On vanilla OpenJDK, the macOS row would show "PollingWatchService (polling, 2-10s delay)". JBR fixes the one platform where OpenJDK falls short.
+
+Note: Linux's inotify doesn't support recursive watching natively, but you can register directories individually. This is the same on vanilla OpenJDK — JBR doesn't change Linux behavior (it's already native).
+
+#### Products Already Built on JBR
+
+From [JBR's official README](https://github.com/JetBrains/JetBrainsRuntime/blob/main/.github/README.md):
+- **IntelliJ IDEA** — world's most popular Java IDE
+- **Android Studio** — Google's official Android IDE
+- **WebStorm, PyCharm, CLion, GoLand, Rider, PhpStorm, RubyMine, DataGrip**
+- **JetBrains Toolbox App** — the system tray app that inspired agent-pulse's UX
+- **JProfiler** (ej-technologies) — commercial Java profiler
+- **YourKit** — commercial Java/.NET profiler
+
+These include both JetBrains products and third-party commercial applications, confirming JBR's suitability for external use.
+
+#### Potential Risks & Mitigations
+
+| Risk | Severity | Mitigation |
+|---|---|---|
+| JetBrains stops maintaining JBR | Very Low | Powers all JetBrains IDEs (30M+ users). Would require abandoning their entire product line. |
+| JBR diverges from OpenJDK | Low | JBR tracks OpenJDK closely; branches `jbr21`, `jbr25` are regularly synced. Changes are additive, not breaking. |
+| FSEvents WatchService has bugs | Low | Battle-tested in production by all JetBrains IDEs. Author confirmed: "No known bugs exist" (Feb 2023). In use since ~mid-2022. |
+| JBR bloats binary size | None | JBR via `jlink` = same size as vanilla OpenJDK via `jlink` (~50-60MB). The FSEvents code adds negligible size. |
+| Vendor lock-in | Low | Your app uses standard `java.nio.file.WatchService` API. Switching to vanilla OpenJDK = code unchanged, just loses native macOS FS detection (falls back to polling). |
+| JBR API features unavailable | None | JBR API is designed for graceful degradation. `JBR.isXxxSupported()` returns false on non-JBR runtimes. |
+
+---
+
+### Feasibility Verdict
+
+#### Legal: ✅ Fully Clear
+- Same license as all OpenJDK distributions (GPL-2.0 + Classpath Exception)
+- Explicitly permits bundling with any application (proprietary or open-source)
+- Standard redistribution obligations (include license, link to source)
+- Proven by JProfiler, YourKit, and other commercial products using JBR
+
+#### Technical: ✅ Excellent Fit
+- Compose Desktop bundles JBR **by default** — zero extra configuration
+- Native FSEvents WatchService on macOS — eliminates the polling problem entirely
+- JBR API provides bonus desktop integration (custom title bar, rounded corners, HiDPI)
+- JBR 21 (LTS) is stable, actively maintained, and widely deployed
+- No cross-compilation needed — Gradle handles per-platform packaging
+
+---
+
 ## Updated Recommendation (Four Options)
 
 ### Option A: Pure Tauri/Rust

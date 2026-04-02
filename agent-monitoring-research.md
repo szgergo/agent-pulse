@@ -20,7 +20,7 @@ This document explains, step by step, how agent-pulse can detect and monitor run
    - [GitHub Copilot in VS Code](#github-copilot-in-vs-code)
    - [GitHub Copilot in IntelliJ](#github-copilot-in-intellij)
    - [Claude Code in VS Code](#claude-code-in-vs-code)
-   - [Cursor IDE](#cursor-ide)
+   - [Cursor IDE & CLI](#cursor-ide--cli)
 6. [How OSHI Enables Process Detection on the JVM](#how-oshi-enables-process-detection-on-the-jvm)
 7. [File System Watching Strategy](#file-system-watching-strategy)
 8. [Combining Detection Layers](#combining-detection-layers)
@@ -436,28 +436,57 @@ Source: [Claude Code VS Code docs](https://code.claude.com/docs/en/vs-code), [Cl
 
 ---
 
-### Cursor IDE
+### Cursor IDE & CLI
 
-**Environment**: Standalone IDE (Electron-based, VS Code fork)
+**Environment**: Standalone IDE (Electron-based, VS Code fork) + CLI agent (`cursor agent`)
 
-**Detection method**: Process scanning (primary) + file watching (secondary)
+**Detection method**: Process scanning (primary) + file watching (secondary) + hooks system (optional, OTel via third-party)
 
 **Step-by-step detection:**
 
 1. Scan for processes named `Cursor` or `Cursor Helper` using OSHI
-2. Cursor's agent (Cascade-like) creates checkpoints in `<project>/.cursor/checkpoints/`
-3. Watch project-level `.cursor/` directories for checkpoint and log changes
-4. `.cursorignore` and `.cursorrules` files in the project root indicate Cursor is configured for a project
+2. Cursor stores workspace session data in a centralized `state.vscdb` SQLite database at `~/Library/Application Support/Cursor/User/workspaceStorage/<hash>/state.vscdb` (macOS)
+3. The `state.vscdb` contains `composer.composerData` key in `ItemTable` with JSON blob tracking all agent sessions: IDs, names, timestamps, lines added/removed, files changed, mode (chat/edit), and more
+4. AI-code tracking database at `~/.cursor/ai-tracking/ai-code-tracking.db` stores scored commits (AI vs human lines), conversation summaries, and file content tracking
+5. Agent transcripts are written as JSONL at `~/.cursor/projects/<path-hash>/agent-transcripts/<composerId>/<composerId>.jsonl` with full conversation history (user messages + assistant responses)
+6. MCP server metadata is stored per-project at `~/.cursor/projects/<path-hash>/mcps/<server-name>/`
+7. Application logs at `~/Library/Application Support/Cursor/logs/<date>/main.log` contain agent-loop wakelock events with timestamps and durations
+8. For CLI detection: scan for `cursor` process with `agent` in command line args
 
 **Process signature:**
-- Name: `Cursor`, `Cursor Helper`, `Cursor Helper (Renderer)`
-- Electron app bundle
+- IDE: `Cursor`, `Cursor Helper`, `Cursor Helper (Renderer)`, `Cursor Helper (Plugin)`
+- CLI: `cursor agent` (or `cursor` with `agent` subcommand)
+- Electron app bundle at `/Applications/Cursor.app`
 
-**Challenge**: Cursor's session state is project-local (in `.cursor/`), not centralized like Copilot CLI. agent-pulse would need to know which project directories to watch, or rely on process scanning to discover active Cursor instances first.
+**Key discovery: Centralized state, not just project-local.** Previously assessed as "project-local only," but inspection reveals Cursor stores rich session data centrally:
 
-**Confidence level**: Medium — process detection is reliable, but project-local state requires per-project directory watching.
+1. **`state.vscdb`** — SQLite database per workspace with full session metadata
+2. **`~/.cursor/ai-tracking/ai-code-tracking.db`** — Global AI tracking database
+3. **`~/.cursor/projects/`** — Agent transcripts, MCP configs, per-project data
 
-Source: [Cursor docs](https://cursor.com/docs/agent/overview), [Cursor architecture deep dive](https://collabnix.com/cursor-ai-deep-dive-technical-architecture-advanced-features-best-practices-2025/)
+**Cursor Hooks System (v1.7+):** Cursor has a first-class hooks system via `.cursor/hooks.json` (project-level or `~/.cursor/hooks.json` global). Hooks fire at lifecycle points including `sessionStart`, `sessionEnd`, `preToolUse`, `postToolUse`, `beforeShellExecution`, `afterFileEdit`, `beforeSubmitPrompt`, `stop`, and more. Each hook receives JSON payloads with `conversation_id`, `generation_id`, prompt content, attachments, and workspace roots.
+
+**Third-party OTel support via hooks:** The [cursor-otel-hook](https://github.com/LangGuard-AI/cursor-otel-hook) project uses Cursor's hooks system to export structured OTel traces covering session lifecycle, tool usage, shell commands, MCP calls, file operations, prompts, and subagent activities. agent-pulse could either:
+1. Bundle a similar hook that exports to its local OTLP receiver, or
+2. Read the hook artifacts directly from `~/.cursor/hooks/`
+
+**Cursor CLI Agent:** Cursor now has a full CLI agent mode (`cursor agent`) with:
+- Interactive agent sessions from the terminal
+- Plan/Ask/Agent modes
+- Session resume (`cursor agent --resume=<session-id>`)
+- Session listing (`cursor agent ls`)
+- Cloud handoff support
+- AGENTS.md and CLAUDE.md rule file support
+
+**Confidence level**: High — centralized SQLite databases with rich metadata, agent transcripts, and hooks system provide multiple monitoring vectors.
+
+Sources:
+- [Cursor docs: Agent overview](https://cursor.com/docs/agent/overview)
+- [Cursor docs: CLI overview](https://cursor.com/docs/cli/overview)
+- [Cursor docs: Using Agent in CLI](https://cursor.com/docs/cli/using)
+- [Cursor docs: Hooks](https://cursor.com/docs/hooks)
+- [cursor-otel-hook](https://github.com/LangGuard-AI/cursor-otel-hook)
+- [GitButler: Deep Dive into Cursor Hooks](https://blog.gitbutler.com/cursor-hooks-deep-dive)
 
 ---
 
@@ -601,6 +630,8 @@ This hybrid approach avoids watching the entire filesystem while still catching 
     │ - workspace.yaml (git context)                │
     │ - events.jsonl (activity timeline)            │
     │ - MEMORY.md (Claude project memory)           │
+    │ - state.vscdb (Cursor session metadata)       │
+    │ - agent-transcripts/*.jsonl (Cursor history)  │
     └────────┬──────────────────────────────────────┘
              │
              ▼
@@ -627,7 +658,7 @@ This hybrid approach avoids watching the entire filesystem while still catching 
 | **Claude Code VS Code** | High (same as CLI) | Medium (same as CLI) | **High** |
 | **Codex CLI** | High (distinctive process name) | Medium (rollout files, no locks) | **High** |
 | **Gemini CLI** | High (distinctive process name) | Medium (chat files) | **High** |
-| **Cursor IDE** | High (distinctive app name) | Low (project-local, requires discovery) | **Medium-High** |
+| **Cursor IDE** | High (distinctive app name) | Very High (centralized SQLite + agent transcripts) | **Very High** |
 
 ---
 
@@ -922,28 +953,96 @@ Gemini CLI stores per-project chat histories and configuration with moderate det
 
 ---
 
-### Cursor IDE
+### Cursor IDE & CLI
 
-Cursor stores agent checkpoints and logs per-project, providing moderate visibility once the project is discovered.
+**Much richer than initially assessed.** Cursor stores centralized session data in SQLite databases, writes agent transcripts as JSONL, and has a hooks system that can export OTel telemetry. This was verified from a live Cursor installation on this machine.
+
+#### Tier 1: Centralized SQLite Databases (Always Available)
+
+**`state.vscdb`** — Per-workspace SQLite at `~/Library/Application Support/Cursor/User/workspaceStorage/<hash>/state.vscdb`
+
+| Data Point | Source Key | How to Extract | Example Value |
+|---|---|---|---|
+| Session/Composer ID | `composer.composerData` | JSON blob → `allComposers[].composerId` | `0e8c466f-7cc8-462a-9bb3-43aad3376c83` |
+| Session name | `composer.composerData` | `allComposers[].name` | `"Welcome to Cursor"` |
+| Mode (chat/edit) | `composer.composerData` | `allComposers[].unifiedMode` / `forceMode` | `"chat"` / `"edit"` |
+| Lines added/removed | `composer.composerData` | `allComposers[].totalLinesAdded` / `totalLinesRemoved` | `1120` / `0` |
+| Files changed count | `composer.composerData` | `allComposers[].filesChangedCount` | `3` |
+| Session subtitle | `composer.composerData` | `allComposers[].subtitle` | `"Edited script.js, styles.css, index.html"` |
+| Created/updated timestamps | `composer.composerData` | `allComposers[].createdAt` / `lastUpdatedAt` | Unix ms timestamps |
+| Context usage % | `composer.composerData` | `allComposers[].contextUsagePercent` | `11.5` |
+| Archive/draft status | `composer.composerData` | `allComposers[].isArchived` / `isDraft` | `false` / `false` |
+| Worktree status | `composer.composerData` | `allComposers[].isWorktree` | `false` |
+| Sub-composer count | `composer.composerData` | `allComposers[].numSubComposers` | `0` |
+| Unread messages | `composer.composerData` | `allComposers[].hasUnreadMessages` | `false` |
+| User prompts | `aiService.prompts` | JSON array of `{text, commandType}` | Full prompt history |
+| Generations log | `aiService.generations` | JSON array of `{unixMs, generationUUID, type, textDescription}` | Timestamped generation history |
+
+**`ai-code-tracking.db`** — Global AI tracking at `~/.cursor/ai-tracking/ai-code-tracking.db`
+
+| Data Point | Table | How to Extract | Available |
+|---|---|---|---|
+| Conversation summaries | `conversation_summaries` | `conversationId, title, tldr, overview, summaryBullets, model, mode` | Yes |
+| Scored commits (AI vs human) | `scored_commits` | `commitHash, linesAdded, composerLinesAdded, humanLinesAdded` | Yes |
+| AI code hashes | `ai_code_hashes` | `hash, source, fileExtension, requestId, conversationId, model` | Yes |
+| Tracked file content | `tracked_file_content` | `gitPath, content, conversationId, model` | Yes |
+| AI deleted files | `ai_deleted_files` | `gitPath, composerId, conversationId, model, deletedAt` | Yes |
+| Tracking start time | `tracking_state` | Key-value state | Yes |
+
+#### Tier 2: Agent Transcripts (Full Conversation History)
+
+Agent transcripts are stored as JSONL at `~/.cursor/projects/<path-hash>/agent-transcripts/<composerId>/<composerId>.jsonl`.
 
 | Data Point | Source | How to Extract | Available |
 |---|---|---|---|
-| Process name | OSHI | `Cursor`, `Cursor Helper` | Yes |
-| CPU/memory usage | OSHI | Standard OSHI metrics | Yes |
-| Process uptime | OSHI | `startTime` | Yes |
-| Working directory | OSHI | Process CWD or window title heuristics | Yes |
-| Agent checkpoints | `<project>/.cursor/checkpoints/` | Versioned state snapshots | Yes (per project) |
-| Agent logs | `<project>/.cursor/logs/` | Timestamped action logs | Yes (per project) |
-| Ignore rules | `<project>/.cursorignore` | Text file | Yes |
-| Agent rules | `<project>/.cursorrules` | Text file | Yes (if exists) |
-| Indexing config | `<project>/.cursorindexingignore` | Text file | Yes |
-| Session content | Internal to Cursor app | Not in accessible file format | No |
-| Token usage | Internal to Cursor app | Not in accessible file format | No |
+| Full conversation | JSONL transcript | Parse `{role, message}` entries | Yes |
+| User messages | JSONL transcript | Filter `role: "user"` entries | Yes |
+| Assistant responses | JSONL transcript | Filter `role: "assistant"` entries | Yes |
+| Tool calls | JSONL transcript | Embedded in assistant messages | Yes |
+| Thinking/reasoning | JSONL transcript | Embedded in assistant content | Yes |
+
+The path-hash for projects encodes the workspace path (e.g., `Users-gergoszabo-Documents-Projects` → `~/.cursor/projects/Users-gergoszabo-Documents-Projects/`). This is discoverable by watching the `~/.cursor/projects/` directory.
+
+#### Tier 3: Application Logs & Hooks
+
+| Data Point | Source | How to Extract | Available |
+|---|---|---|---|
+| Agent-loop wakelocks | `~/Library/.../Cursor/logs/<date>/main.log` | Parse `[PowerMainService]` wakelock entries | Yes |
+| Wakelock durations | main.log | `heldForMs=<N>` in wakelock stop entries | Yes |
+| Agent-loop reason | main.log | `reason="agent-loop"` or `"agent-loop-resumed"` | Yes |
+| MCP server configs | `~/.cursor/projects/<hash>/mcps/<server>/` | `SERVER_METADATA.json` | Yes |
+| Cursor skills | `~/.cursor/skills-cursor/` | Manifest + SKILL.md files | Yes |
+| IDE state | `~/.cursor/ide_state.json` | JSON with recently viewed files | Yes |
+| Process metrics | OSHI | CPU/memory/uptime of Cursor processes | Yes |
+
+#### Tier 4: Hooks + OTel (Optional, via cursor-otel-hook)
+
+If agent-pulse provides a hook script (or the user installs cursor-otel-hook), Cursor's hooks system sends JSON payloads for every agent lifecycle event to the hook. This can export to agent-pulse's OTLP receiver.
+
+| Data Point | Hook Event | Available |
+|---|---|---|
+| Session start/end | `sessionStart` / `sessionEnd` | Yes |
+| Tool execution (pre/post) | `preToolUse` / `postToolUse` | Yes |
+| Shell commands | `beforeShellExecution` / `afterShellExecution` | Yes |
+| File edits | `afterFileEdit` | Yes |
+| Prompt submission | `beforeSubmitPrompt` | Yes |
+| Agent response complete | `stop` | Yes |
+| MCP calls | `beforeMCPExecution` / `afterMCPExecution` | Yes |
+| Context compaction | `preCompact` | Yes |
 
 **What agent-pulse can display for Cursor:**
-- Real-time: active status, CPU/memory, working directory
-- Context: configured rules, ignore patterns, checkpoint count
-- Limitation: no conversation content or token metrics from external files — agent-pulse can only show "Cursor is active on project X with Y checkpoints"
+
+*Without hooks (Tier 1-3 — always available):*
+- Real-time: active status, CPU/memory, agent-loop wakelock status (from main.log)
+- Session: composer ID, name, mode (chat/edit), lines added/removed, files changed, subtitle, context usage %, created/updated timestamps
+- History: full conversation transcript (JSONL), all user prompts, generation history
+- Code impact: AI vs human line attribution per commit (scored_commits), conversation summaries with model info
+- Context: MCP servers, configured skills, recently viewed files
+
+*With hooks (Tier 4 — optional):*
+- Real-time tool calls, shell commands, file edits, and prompt submissions streamed to agent-pulse
+- Session lifecycle events with conversation_id and generation_id
+- **This would make Cursor monitoring approach "Excellent" level**
 
 ---
 
@@ -960,13 +1059,14 @@ Cursor stores agent checkpoints and logs per-project, providing moderate visibil
 | **Claude Code VS Code** (with OTel) | ●●● | ●●● | ●●● | ●●● | ●●● | ●●○ | **Excellent** |
 | **Codex CLI** | ●●○ | ●●○ | ●●○ | ●○○ | ●●○ | ●●○ | **Good** |
 | **Gemini CLI** | ●●○ | ●●○ | ●●○ | ●○○ | ○○○ | ●●○ | **Good** |
-| **Cursor IDE** | ●●○ | ●●○ | ●○○ | ○○○ | ○○○ | ○○○ | **Basic** |
+| **Cursor IDE** (file-based) | ●●● | ●●● | ●●○ | ○○○ | ●●● | ●●● | **Very Good** |
+| **Cursor IDE** (with hooks) | ●●● | ●●● | ●●● | ○○○ | ●●● | ●●● | **Excellent** |
 
 Key: ●●● = rich data / ●●○ = moderate / ●○○ = minimal / ○○○ = not available
 
 Key: ●●○ for Conversation in Claude Code + OTel reflects that prompt content is redacted by default (only lengths). Full content requires explicit `OTEL_LOG_USER_PROMPTS=1` opt-in.
 
-**Key takeaway:** GitHub Copilot CLI and Claude Code (with OTel) are the two richest monitoring targets. Copilot writes everything to local files automatically. Claude Code requires opt-in telemetry configuration but then provides equally rich data via OTLP — tokens, cost, tool calls, code impact, and session IDs. **agent-pulse should treat OTLP ingestion as a first-class feature**, not optional, since it transforms Claude Code from "Basic" to "Excellent" and positions agent-pulse as a zero-config receiver that replaces the need for Grafana/Prometheus stacks for individual developers.
+**Key takeaway:** GitHub Copilot CLI, Claude Code (with OTel), and Cursor are the three richest monitoring targets. Copilot writes everything to local files automatically. Claude Code requires opt-in telemetry configuration but then provides equally rich data via OTLP. Cursor stores centralized SQLite databases with session metadata, AI-code tracking (AI vs human lines per commit), and full conversation transcripts as JSONL — plus an optional hooks system for real-time event streaming. **agent-pulse should treat OTLP ingestion as a first-class feature**, since it transforms both Claude Code and Cursor (via hooks) from limited to excellent, and positions agent-pulse as a zero-config local receiver that replaces the need for Grafana/Prometheus stacks for individual developers.
 
 ---
 
@@ -1096,6 +1196,9 @@ If another OTLP collector is already running on port 4317 (e.g., Grafana Alloy, 
 - [Gemini CLI GitHub](https://github.com/google-gemini/gemini-cli)
 - [Gemini CLI config](https://github.com/google-gemini/gemini-cli/blob/main/docs/reference/configuration.md)
 - [Cursor docs: Agent overview](https://cursor.com/docs/agent/overview)
+- [Cursor docs: CLI overview](https://cursor.com/docs/cli/overview)
+- [Cursor docs: Using Agent in CLI](https://cursor.com/docs/cli/using)
+- [Cursor docs: Hooks](https://cursor.com/docs/hooks)
 - [OSHI GitHub](https://github.com/oshi/oshi)
 - [OSHI OSProcess API](https://www.oshi.ooo/oshi-core-java11/apidocs/com.github.oshi/oshi/software/os/OSProcess.html)
 
@@ -1113,7 +1216,10 @@ If another OTLP collector is already running on port 4317 (e.g., Grafana Alloy, 
 
 ### Community & Analysis
 - [GridWatch: Copilot session dashboard](https://www.faesel.com/blog/gridwatch-copilot-session-manager)
-- [Cursor architecture deep dive](https://collabnix.com/cursor-ai-deep-dive-technical-architecture-advanced-features-best-practices-2025/)
+- [cursor-otel-hook: OpenTelemetry integration for Cursor](https://github.com/LangGuard-AI/cursor-otel-hook)
+- [GitButler: Deep Dive into Cursor Hooks](https://blog.gitbutler.com/cursor-hooks-deep-dive)
+- [Cursor Chat History Recovery Guide](https://www.cursor.fan/tutorial/HowTo/manage-cursor-chat-history/)
+- [CursorChatAnalyzer](https://github.com/toddllm/CursorChatAnalyzer)
 
 ### JetBrains & IDE Integration
 - [JetBrains Marketplace: GitHub Copilot plugin](https://plugins.jetbrains.com/plugin/17718-github-copilot--your-ai-pair-programmer)
@@ -1122,5 +1228,7 @@ If another OTLP collector is already running on port 4317 (e.g., Grafana Alloy, 
 
 ### Live System Evidence
 - Process signatures captured via `ps aux` on macOS (Apple Silicon, 2026-04-02)
-- File system artifacts inspected from `~/.copilot/session-state/`, `~/.claude/`, `~/.codex/`
+- File system artifacts inspected from `~/.copilot/session-state/`, `~/.claude/`, `~/.codex/`, `~/.cursor/`, `~/Library/Application Support/Cursor/`
+- Cursor `state.vscdb` and `ai-code-tracking.db` SQLite schemas verified via live database inspection
+- Cursor agent transcripts (JSONL) verified at `~/.cursor/projects/*/agent-transcripts/`
 - Lock file format and contents verified from live running sessions

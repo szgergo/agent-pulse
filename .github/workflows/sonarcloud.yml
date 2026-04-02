@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   sonarcloud:
-    name: Bootstrap SonarCloud analysis
+    name: SonarCloud analysis
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -37,19 +37,26 @@ jobs:
             echo "has_gradle=false" >> "$GITHUB_OUTPUT"
           fi
 
+          if [ -f sonar-project.properties ]; then
+            echo "has_sonar_properties=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_sonar_properties=false" >> "$GITHUB_OUTPUT"
+          fi
+
           if [ -n "${SONAR_TOKEN:-}" ]; then
             echo "has_token=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_token=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Skip until Gradle project and SONAR_TOKEN are available
-        if: ${{ steps.precheck.outputs.has_gradle != 'true' || steps.precheck.outputs.has_token != 'true' }}
+      - name: Skip when SONAR_TOKEN is unavailable
+        if: ${{ steps.precheck.outputs.has_token != 'true' }}
         run: |
-          echo "SonarCloud bootstrap is installed, but analysis is not active yet."
+          echo "SONAR_TOKEN is missing; analysis cannot run yet."
           echo "has_gradle=${{ steps.precheck.outputs.has_gradle }}"
+          echo "has_sonar_properties=${{ steps.precheck.outputs.has_sonar_properties }}"
           echo "has_token=${{ steps.precheck.outputs.has_token }}"
-          echo "Next steps: add the Gradle project files and configure the SONAR_TOKEN repository secret."
+          echo "Add the SONAR_TOKEN repository secret to activate analysis."
 
       - name: Set up JetBrains Runtime 25
         if: ${{ steps.precheck.outputs.has_gradle == 'true' && steps.precheck.outputs.has_token == 'true' }}
@@ -68,3 +75,17 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: ./gradlew --no-daemon build sonar
+
+      - name: Analyze with SonarCloud GitHub Action
+        if: ${{ steps.precheck.outputs.has_gradle != 'true' && steps.precheck.outputs.has_token == 'true' && steps.precheck.outputs.has_sonar_properties == 'true' }}
+        uses: SonarSource/sonarqube-scan-action@v4.2.1
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Skip when no analysis path is available
+        if: ${{ steps.precheck.outputs.has_token == 'true' && steps.precheck.outputs.has_gradle != 'true' && steps.precheck.outputs.has_sonar_properties != 'true' }}
+        run: |
+          echo "SONAR_TOKEN exists, but no analysis path is configured."
+          echo "Add either Gradle project files or sonar-project.properties."
+

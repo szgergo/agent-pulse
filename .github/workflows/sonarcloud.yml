@@ -5,17 +5,15 @@ on:
     branches:
       - main
   pull_request:
-    branches:
-      - main
-  workflow_dispatch:
+    types: [opened, synchronize, reopened]
 
 concurrency:
   group: sonarcloud-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  sonarcloud:
-    name: SonarCloud analysis
+  build:
+    name: Build and analyze
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -26,75 +24,43 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Check SonarCloud prerequisites
+      - name: Check SONAR_TOKEN
         id: precheck
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
-          if [ -f build.gradle.kts ] && [ -f settings.gradle.kts ] && [ -f gradlew ]; then
-            echo "has_gradle=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_gradle=false" >> "$GITHUB_OUTPUT"
-          fi
-
-          if [ -f sonar-project.properties ]; then
-            echo "has_sonar_properties=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_sonar_properties=false" >> "$GITHUB_OUTPUT"
-          fi
-
           if [ -n "${SONAR_TOKEN:-}" ]; then
             echo "has_token=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_token=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::SONAR_TOKEN is missing — analysis skipped. Add it in repository secrets."
           fi
 
-      - name: Skip when SONAR_TOKEN is unavailable
-        if: ${{ steps.precheck.outputs.has_token != 'true' }}
-        run: |
-          echo "SONAR_TOKEN is missing; analysis cannot run yet."
-          echo "has_gradle=${{ steps.precheck.outputs.has_gradle }}"
-          echo "has_sonar_properties=${{ steps.precheck.outputs.has_sonar_properties }}"
-          echo "has_token=${{ steps.precheck.outputs.has_token }}"
-          echo "Add the SONAR_TOKEN repository secret to activate analysis."
-
-      - name: Set up JetBrains Runtime 25
-        if: ${{ steps.precheck.outputs.has_gradle == 'true' && steps.precheck.outputs.has_token == 'true' }}
+      - name: Set up JDK 17
+        if: steps.precheck.outputs.has_token == 'true'
         uses: actions/setup-java@v4
         with:
-          distribution: jetbrains
-          java-version: '25'
+          java-version: 17
+          distribution: 'zulu'
 
-      - name: Set up Gradle
-        if: ${{ steps.precheck.outputs.has_gradle == 'true' && steps.precheck.outputs.has_token == 'true' }}
-        uses: gradle/actions/setup-gradle@v4
+      - name: Cache SonarCloud packages
+        if: steps.precheck.outputs.has_token == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
 
-      - name: Build and analyze with SonarCloud
-        if: ${{ steps.precheck.outputs.has_gradle == 'true' && steps.precheck.outputs.has_token == 'true' }}
+      - name: Cache Gradle packages
+        if: steps.precheck.outputs.has_token == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/caches
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle') }}
+          restore-keys: ${{ runner.os }}-gradle
+
+      - name: Build and analyze
+        if: steps.precheck.outputs.has_token == 'true'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: ./gradlew --no-daemon build sonar
-
-      - name: Analyze with SonarCloud GitHub Action
-        id: sonar_fallback
-        if: ${{ steps.precheck.outputs.has_gradle != 'true' && steps.precheck.outputs.has_token == 'true' && steps.precheck.outputs.has_sonar_properties == 'true' }}
-        uses: SonarSource/sonarcloud-github-action@v3.1.0
-        continue-on-error: true
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Warn when fallback scan fails
-        if: ${{ steps.sonar_fallback.outcome == 'failure' }}
-        run: |
-          echo "Fallback SonarCloud scan failed."
-          echo "This can happen before the Gradle-based analysis path is available."
-          echo "The workflow remains non-blocking for now; once Gradle scaffold is present, ./gradlew build sonar will be the primary path."
-
-      - name: Skip when no analysis path is available
-        if: ${{ steps.precheck.outputs.has_token == 'true' && steps.precheck.outputs.has_gradle != 'true' && steps.precheck.outputs.has_sonar_properties != 'true' }}
-        run: |
-          echo "SONAR_TOKEN exists, but no analysis path is configured."
-          echo "Add either Gradle project files or sonar-project.properties."
-
+        run: ./gradlew build sonar --info

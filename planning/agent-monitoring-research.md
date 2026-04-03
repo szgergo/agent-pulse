@@ -4,6 +4,8 @@
 
 This document explains, step by step, how agent-pulse can detect and monitor running AI coding agents across different environments (CLI terminals, VS Code, IntelliJ, standalone IDEs). It covers the concrete file system artifacts, process signatures, and metadata each agent produces, backed by real-world evidence gathered from a live macOS development machine and official documentation.
 
+> **See also:** [`agent-extensibility-research.md`](agent-extensibility-research.md) — deep research into push-based monitoring via agent hooks, MCP, OTel, token usage, native process event APIs, and the architecture shift from file scraping to agent-pushed lifecycle events. That document supersedes parts of this one regarding detection strategy.
+
 ---
 
 ## Table of Contents

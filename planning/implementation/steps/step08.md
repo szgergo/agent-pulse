@@ -1,139 +1,115 @@
 # Step 8: codex-gemini — Codex + Gemini hook providers
 
-> **⚠️ NEEDS REVISION FOR HOOKS+FILEWATCH MVP**
-> Replace process scanning + file reading with hook-based monitoring:
-> - Codex: set `notify` command in config to invoke report.sh. Parse thread-id from payload.
-> - Gemini: deploy hooks via settings.json merge. Parse SessionStart/AfterTool events.
-> - Remove rollout JSONL reading — deferred
-> - Remove Gemini chat file reading — deferred
-
 > **⚠️ READ `shared-context.md` FIRST** — it contains all design principles, architecture,
-> SQLite safety rules, connection hygiene, tech stack, and project structure that apply to this step.
+> and project structure that apply to this step.
 > Path: `planning/implementation/shared-context.md`
 
 ---
 
+**Goal**: Deploy Codex notify config and Gemini hook config, implement `CodexProvider` and `GeminiProvider` `processEvent()`.
 
-**Goal**: Detect Codex CLI and Gemini CLI sessions.
+**Pre-check**: Step 7 PR is merged. `git checkout main && git pull`. `./gradlew build` passes.
 
-**Pre-check**: Step 7 PR is merged.
+**App state AFTER this step**: Codex CLI fires its `notify` command which invokes `report.sh`, and events flow through `CodexProvider.processEvent()` into `AgentStateManager`. Gemini CLI fires `AfterTool` hook events which flow through `GeminiProvider.processEvent()`. Both agents appear in the dashboard when active.
 
-**Codex data sources** (read-only):
+---
 
-| File | Key Data |
-|---|---|
-| `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | Session transcript |
-| `~/.codex/history.jsonl` | Global history |
-| `~/.codex/config.toml` | Model, sandbox policy |
+- [ ] **8.1 Deploy Codex notify config**
+  Add/update the `notify` command in `~/.codex/config.toml`. Be careful to preserve existing config content (TOML format).
+  Add to `HookDeployer.deployCodexHooks()`:
+  ```toml
+  notify = ["$HOME/.agent-pulse/hooks/report.sh notify codex-cli"]
+  ```
 
-**Gemini data sources** (read-only):
-
-| File | Key Data |
-|---|---|
-| `~/.gemini/tmp/<project_hash>/chats/` | Chat histories |
-| `~/.gemini/settings.json` | Model, MCP servers |
-
-- [ ] **8.1 Implement CodexProvider** — process scan for `codex`/`codex-tui`, read rollout files, parse config.toml
-
+- [ ] **8.2 Implement CodexProvider.processEvent()**
+  Replace the stub in `src/main/kotlin/com/agentpulse/provider/CodexProvider.kt`:
   ```kotlin
   class CodexProvider : AgentProvider {
-      private val home = Path.of(System.getProperty("user.home"))
+      override val agentType = AgentType.CodexCli
 
-      override val name = "Codex"
-      override val agentType = AgentType.Codex
-      override val watchDirs = listOf(home.resolve(".codex/sessions"))
-      override val processNames = listOf("codex", "codex-tui", "codex-cli")
+      override fun processEvent(event: HookEvent, currentState: AgentState?): AgentState {
+          val threadId = event.rawJson["thread_id"]?.jsonPrimitive?.contentOrNull
+              ?: event.rawJson["thread-id"]?.jsonPrimitive?.contentOrNull
+          val sessionId = threadId ?: event.pid.toString()
 
-      override fun scan(processes: List<ProcessInfo>): List<Agent> {
-          return processes.filter { proc ->
-              processNames.any { proc.name.contains(it, ignoreCase = true) }
-          }.map { proc ->
-              Agent(
-                  id = "Codex:${proc.pid}",
-                  agentType = AgentType.Codex,
-                  status = AgentStatus.Running,
-                  pid = proc.pid,
-                  sessionId = proc.pid.toString(),
-                  startTime = proc.startTime,
-                  cpuPercent = proc.cpuPercent,
-                  memoryBytes = proc.memoryBytes,
-              )
-          }
-      }
-
-      override fun enrich(agent: Agent): Agent {
-          val extra = agent.extra.toMutableMap()
-          var model: String? = null
-
-          // Read config.toml for model
-          val configFile = home.resolve(".codex/config.toml")
-          SafeFileReader.readText(configFile)?.lines()?.forEach { line ->
-              if (line.trimStart().startsWith("model")) {
-                  model = line.substringAfter("=").trim().removeSurrounding("\"")
-              }
-          }
-
-          // Find latest rollout file for session data
-          val sessionsDir = home.resolve(".codex/sessions")
-          if (sessionsDir.exists()) {
-              val latestRollout = sessionsDir.toFile().walkTopDown()
-                  .filter { it.name.startsWith("rollout-") && it.name.endsWith(".jsonl") }
-                  .maxByOrNull { it.lastModified() }
-              latestRollout?.let { file ->
-                  val lines = SafeFileReader.readJsonlTail(file.toPath(), 10)
-                  extra["rolloutEvents"] = lines.size.toString()
-              }
-          }
-
-          return agent.copy(model = model ?: agent.model, extra = extra)
+          return currentState?.copy(
+              eventCount = currentState.eventCount + 1,
+              lastActivity = event.timestamp * 1000,
+              extra = currentState.extra + buildMap {
+                  put("turns", ((currentState.extra["turns"]?.toIntOrNull() ?: 0) + 1).toString())
+              },
+          ) ?: AgentState(
+              id = "${agentType.name}_$sessionId",
+              name = "Codex CLI — ${sessionId.take(8)}",
+              agentType = agentType,
+              status = AgentStatus.Running,
+              pid = event.pid,
+              sessionId = threadId,
+              eventCount = 1,
+              lastActivity = event.timestamp * 1000,
+          )
       }
   }
   ```
 
-- [ ] **8.2 Implement GeminiProvider** — process scan for `gemini`, read chat directories, parse settings.json
+- [ ] **8.3 Deploy Gemini hook config**
+  Merge into `~/.gemini/settings.json` hooks section. Preserve existing settings content.
+  Add to `HookDeployer.deployGeminiHooks()`:
+  ```json
+  {
+    "hooks": {
+      "AfterTool": [
+        { "command": "$HOME/.agent-pulse/hooks/report.sh AfterTool gemini-cli" }
+      ]
+    }
+  }
+  ```
 
+- [ ] **8.4 Implement GeminiProvider.processEvent()**
+  Replace the stub in `src/main/kotlin/com/agentpulse/provider/GeminiProvider.kt`:
   ```kotlin
   class GeminiProvider : AgentProvider {
-      private val home = Path.of(System.getProperty("user.home"))
+      override val agentType = AgentType.GeminiCli
 
-      override val name = "Gemini"
-      override val agentType = AgentType.Gemini
-      override val watchDirs = listOf(home.resolve(".gemini/tmp"))
-      override val processNames = listOf("gemini")
-
-      override fun scan(processes: List<ProcessInfo>): List<Agent> {
-          return processes.filter { proc ->
-              proc.name.contains("gemini", ignoreCase = true)
-          }.map { proc ->
-              Agent(
-                  id = "Gemini:${proc.pid}",
-                  agentType = AgentType.Gemini,
-                  status = AgentStatus.Running,
-                  pid = proc.pid,
-                  sessionId = proc.pid.toString(),
-                  startTime = proc.startTime,
-                  cpuPercent = proc.cpuPercent,
-                  memoryBytes = proc.memoryBytes,
-              )
-          }
-      }
-
-      override fun enrich(agent: Agent): Agent {
-          var model: String? = null
-
-          // Read settings.json for model
-          val settingsFile = home.resolve(".gemini/settings.json")
-          SafeFileReader.readText(settingsFile)?.let { raw ->
-              try {
-                  val json = Json.parseToJsonElement(raw).jsonObject
-                  model = json["model"]?.jsonPrimitive?.contentOrNull
-              } catch (e: Exception) { /* ignore */ }
-          }
-
-          return agent.copy(model = model ?: agent.model)
+      override fun processEvent(event: HookEvent, currentState: AgentState?): AgentState {
+          return currentState?.copy(
+              eventCount = currentState.eventCount + 1,
+              lastActivity = event.timestamp * 1000,
+          ) ?: AgentState(
+              id = "${agentType.name}_${event.pid}",
+              name = "Gemini CLI — PID ${event.pid}",
+              agentType = agentType,
+              status = AgentStatus.Running,
+              pid = event.pid,
+              eventCount = 1,
+              lastActivity = event.timestamp * 1000,
+          )
       }
   }
   ```
 
-- [ ] **8.3 Verify both**
-- [ ] **8.4 Commit, push, and open PR**
+- [ ] **8.5 Verify both**
+  ```bash
+  cd <project-root> && ./gradlew build
+  ```
+  Must compile with zero errors. Then `./gradlew run` — app should launch unchanged.
+  Manual verification:
+  - Configure Codex CLI with the notify command, run a Codex session, confirm events appear in dashboard.
+  - Configure Gemini CLI with the hook config, run a Gemini session, confirm events appear in dashboard.
+
+- [ ] **8.6 Commit, push, and open PR**
+  ```bash
+  git checkout -b step-8-codex-gemini
+  git add -A && git commit -m "feat: Codex + Gemini hook providers
+
+  - Deploy Codex notify config via HookDeployer
+  - CodexProvider.processEvent() — parses thread-id, tracks turns
+  - Deploy Gemini hook config (AfterTool) via HookDeployer
+  - GeminiProvider.processEvent() — tracks events by PID
+
+  Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+  git push -u origin step-8-codex-gemini
+  gh pr create --title "Step 8: Codex + Gemini hook providers" \
+    --body "Deploy hook configs for Codex (notify) and Gemini (AfterTool), implement processEvent() for both providers." \
+    --base main
+  ```

@@ -89,7 +89,7 @@
           writer = process!!.outputStream.bufferedWriter()
       }
 
-      override fun add(agent: Agent) {
+      override fun add(agent: AgentState) {
           val cmd = buildJsonObject {
               put("action", "add")
               put("id", agent.id)

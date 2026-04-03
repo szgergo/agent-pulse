@@ -4,20 +4,18 @@
 > SQLite safety rules, connection hygiene, tech stack, and project structure that apply to this step.
 > Path: `planning/implementation/shared-context.md`
 
----
 
-
-**Goal**: Polished Compose Material 3 dashboard showing agents with status, fleet tree, and settings.
+**Goal**: Polished Compose Material 3 dashboard showing agents with status and settings.
 
 **Pre-check**: Step 4 PR is merged. `./gradlew run` detects Copilot agents.
 
-**App state AFTER this step**: Dark-themed dashboard with agent cards. Each card shows: status dot, agent icon, name, model, PID, uptime, token bar, fleet children. Auto-updates when agents start/stop. Empty state when no agents. Settings panel for scan interval.
+**App state AFTER this step**: Dark-themed dashboard with agent cards. Each card shows: status dot, agent icon, name, model, PID, uptime, token bar. Updates reactively via push events from hooks — no periodic scanning. Empty state when no agents. Settings panel for provider toggles and hotkey info.
 
 **Files to create**:
 - `src/main/kotlin/com/agentpulse/ui/Theme.kt` — dark color scheme
 - `src/main/kotlin/com/agentpulse/ui/AgentCard.kt` — per-agent card composable
 - `src/main/kotlin/com/agentpulse/ui/Dashboard.kt` — agent list + header + empty state
-- `src/main/kotlin/com/agentpulse/ui/Settings.kt` — scan interval, provider toggles
+- `src/main/kotlin/com/agentpulse/ui/Settings.kt` — provider toggles, hotkey display
 - `src/main/kotlin/com/agentpulse/ui/App.kt` — root composable with navigation
 
 - [ ] **5.1 Create Theme.kt**
@@ -69,7 +67,6 @@
     - Model line (if available)
     - CWD line (truncated)
     - Token bar: LinearProgressIndicator with label
-    - Children: indented list with border-start
 
   ```kotlin
   package com.agentpulse.ui
@@ -85,11 +82,11 @@
   import androidx.compose.ui.text.font.FontWeight
   import androidx.compose.ui.text.style.TextOverflow
   import androidx.compose.ui.unit.dp
-  import com.agentpulse.model.Agent
+  import com.agentpulse.model.AgentState
   import com.agentpulse.model.AgentStatus
 
   @Composable
-  fun AgentCard(agent: Agent) {
+  fun AgentCard(agent: AgentState) {
       Card(
           modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
           colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -153,17 +150,6 @@
                       color = MaterialTheme.colorScheme.onSurfaceVariant)
               }
 
-              // Fleet children
-              if (agent.children.isNotEmpty()) {
-                  Spacer(Modifier.height(4.dp))
-                  Column(modifier = Modifier.padding(start = 16.dp)) {
-                      agent.children.forEach { child ->
-                          Text("├─ ${child.name} (PID ${child.pid})",
-                              style = MaterialTheme.typography.bodySmall,
-                              color = MaterialTheme.colorScheme.onSurfaceVariant)
-                      }
-                  }
-              }
           }
       }
   }
@@ -181,8 +167,8 @@
   ```
 
 - [ ] **5.3 Create Dashboard.kt**
-    - Takes `StateFlow<List<Agent>>` as parameter, collect as state
-    - Header: "🫀 agent-pulse" + refresh button
+    - Takes `StateFlow<List<AgentState>>` as parameter, collect as state
+    - Header: "🫀 agent-pulse"
     - Body: LazyColumn of AgentCards, or empty state
     - Footer: "N agents detected" + settings button
 
@@ -199,13 +185,12 @@
   import androidx.compose.ui.Alignment
   import androidx.compose.ui.Modifier
   import androidx.compose.ui.unit.dp
-  import com.agentpulse.model.Agent
+  import com.agentpulse.model.AgentState
   import kotlinx.coroutines.flow.StateFlow
 
   @Composable
   fun Dashboard(
-      agentsFlow: StateFlow<List<Agent>>,
-      onRefresh: () -> Unit,
+      agentsFlow: StateFlow<List<AgentState>>,
       onOpenSettings: () -> Unit,
   ) {
       val agents by agentsFlow.collectAsState()
@@ -218,9 +203,6 @@
           ) {
               Text("🫀 agent-pulse", style = MaterialTheme.typography.titleLarge,
                   modifier = Modifier.weight(1f))
-              IconButton(onClick = onRefresh) {
-                  Text("⟳", style = MaterialTheme.typography.titleMedium)
-              }
           }
 
           // Body: agent list or empty state
@@ -256,7 +238,6 @@
   ```
 
 - [ ] **5.4 Create Settings.kt**
-    - Scan interval selector (5s, 15s, 30s)
     - Provider enable/disable toggles
     - Global hotkey display (read-only for now)
 
@@ -272,8 +253,6 @@
 
   @Composable
   fun Settings(onBack: () -> Unit) {
-      var scanInterval by remember { mutableStateOf(5) }
-
       Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
           Row(verticalAlignment = Alignment.CenterVertically) {
               TextButton(onClick = onBack) { Text("← Back") }
@@ -283,17 +262,10 @@
 
           Spacer(Modifier.height(16.dp))
 
-          Text("Scan interval", style = MaterialTheme.typography.titleSmall)
-          Row(verticalAlignment = Alignment.CenterVertically) {
-              listOf(5, 15, 30).forEach { interval ->
-                  FilterChip(
-                      selected = scanInterval == interval,
-                      onClick = { scanInterval = interval },
-                      label = { Text("${interval}s") },
-                      modifier = Modifier.padding(end = 8.dp),
-                  )
-              }
-          }
+          Text("Hook status", style = MaterialTheme.typography.titleSmall)
+          Text("Events are pushed from agent hooks — no polling needed.",
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant)
 
           Spacer(Modifier.height(16.dp))
           Text("Global hotkey", style = MaterialTheme.typography.titleSmall)
@@ -306,25 +278,22 @@
 
 - [ ] **5.5 Create App.kt**
     - Navigation: Dashboard ↔ Settings
-    - Wire to DetectionOrchestrator.agents StateFlow
+    - Wire to AgentStateManager.agents StateFlow
 
   ```kotlin
   package com.agentpulse.ui
 
   import androidx.compose.runtime.*
-  import com.agentpulse.detection.DetectionOrchestrator
-  import kotlinx.coroutines.launch
+  import com.agentpulse.provider.AgentStateManager
 
   @Composable
-  fun App(orchestrator: DetectionOrchestrator) {
+  fun App(stateManager: AgentStateManager) {
       var screen by remember { mutableStateOf("dashboard") }
-      val scope = rememberCoroutineScope()
 
       AgentPulseTheme {
           when (screen) {
               "dashboard" -> Dashboard(
-                  agentsFlow = orchestrator.agents,
-                  onRefresh = { scope.launch { orchestrator.performScan() } },
+                  agentsFlow = stateManager.agents,
                   onOpenSettings = { screen = "settings" },
               )
               "settings" -> Settings(onBack = { screen = "dashboard" })
@@ -334,11 +303,11 @@
   ```
 
 - [ ] **5.6 Update Main.kt**
-    - Replace placeholder UI with `App(orchestrator)` composable
+    - Replace placeholder UI with `App(stateManager)` composable
 
 - [ ] **5.7 Verify with real data**
     - Run with active Copilot sessions
     - Agent cards show correct data
-    - Auto-refresh works when agents start/stop
+    - UI updates reactively when agents start/stop (push events from hooks)
 
 - [ ] **5.8 Commit, push, and open PR**

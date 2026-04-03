@@ -1,171 +1,174 @@
-# Step 3: detection — Hook event watcher
-
-> **⚠️ NEEDS REVISION FOR HOOKS+FILEWATCH MVP**
-> This step was designed around OSHI process scanning + FileWatcher on agent dirs. Key changes:
-> - Remove `ProcessScanner.kt` (OSHI) — deferred to post-MVP
-> - Replace with `HookEventWatcher.kt`: single FileWatcher on `~/.agent-pulse/events/`
-> - Parse filename for metadata (agent, event, PID, timestamp)
-> - Read file content for raw event JSON
-> - Add `HookDeployer.kt`: first-run hook config deployment
-> - Add periodic PID validation (`kill -0`) for liveness checks
-> - Add startup scan of events/ dir for recovery after restart
-> - `DetectionOrchestrator` simplified: no process scanning, just FileWatch + PID checks
+# Step 3: watcher — Hook event watcher + deployer
 
 > **⚠️ READ `shared-context.md` FIRST** — it contains all design principles, architecture,
-> SQLite safety rules, connection hygiene, tech stack, and project structure that apply to this step.
+> and project structure that apply to this step.
 > Path: `planning/implementation/shared-context.md`
 
 ---
 
-
-**Goal**: Background detection engine that discovers agent processes via OSHI and watches FS changes via JBR's WatchService, flowing results into a `StateFlow<List<Agent>>`.
+**Goal**: Background event watcher that monitors `~/.agent-pulse/events/` for hook event files, parses them into `HookEvent` objects, and feeds them to `AgentStateManager`. Plus a first-run hook deployer that creates the shared hook infrastructure (`report.sh`, events directory).
 
 **Pre-check**: Step 2 PR is merged. `./gradlew build` passes.
 
-**App state AFTER this step**: On launch, terminal shows `[agent-pulse] Watching: ~/.copilot/session-state/` (and other dirs that exist). Process scanner runs every 5 seconds. The terminal shows `[agent-pulse] Scan: 0 agents found` (stub providers return empty). UI still shows placeholder — agents display in Step 5.
+**App state AFTER this step**: On launch, terminal shows `[agent-pulse] Watching: ~/.agent-pulse/events/`. Hook deployer creates `~/.agent-pulse/hooks/report.sh` and the events directory. When a hooked agent fires events, terminal shows `[agent-pulse] Event: copilot-cli/sessionStart (PID 12345)`. UI still shows placeholder — agent display comes in Step 5.
 
 **Files to create**:
-- `src/main/kotlin/com/agentpulse/detection/ProcessScanner.kt`
-- `src/main/kotlin/com/agentpulse/detection/FileWatcher.kt`
-- `src/main/kotlin/com/agentpulse/detection/DetectionOrchestrator.kt`
+- `src/main/kotlin/com/agentpulse/watcher/HookEventWatcher.kt`
+- `src/main/kotlin/com/agentpulse/deploy/HookDeployer.kt`
 
-- [ ] **3.1 Create ProcessScanner.kt**
-    - Wraps OSHI's `SystemInfo().operatingSystem.getProcesses()`
-    - `scan(targetNames: List<String>): List<ProcessInfo>` — refresh processes, filter by name match (case-insensitive contains), map to `ProcessInfo` data class
-    - `getProcess(pid: Int): ProcessInfo?` — look up single process by PID (for lock file cross-referencing)
-    - `buildProcessTree(processes: List<ProcessInfo>): Map<Int, List<ProcessInfo>>` — group by parentPid
+**Data flow** (for reference):
+```
+Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
+  → HookEventWatcher detects ENTRY_CREATE via WatchService
+  → Parses filename: <timestamp>-<agent>-<eventType>-<ppid>.json
+  → Reads file content as JsonObject
+  → Creates HookEvent(agent, eventType, pid, timestamp, rawJson)
+  → AgentStateManager.onEvent(event)
+  → Routes to provider → updates StateFlow → UI reacts
+```
 
-  Key OSHI code pattern (read-only):
+---
+
+- [ ] **3.1 Create HookEventWatcher.kt**
+
+  `src/main/kotlin/com/agentpulse/watcher/HookEventWatcher.kt`
+
+  Responsibilities:
+  - Uses `java.nio.file.WatchService` (JBR = native FSEvents on macOS)
+  - Watches `~/.agent-pulse/events/` for `ENTRY_CREATE`
+  - On new file: parse filename `<timestamp>-<agent>-<eventType>-<ppid>.json`
+  - Read file content as `JsonObject` via `kotlinx.serialization.json.Json`
+  - Create `HookEvent(agent, eventType, pid, timestamp, rawJson)`
+  - Call `AgentStateManager.onEvent(event)`
+  - Delete processed file (cleanup)
+  - Ignore files starting with `.tmp.` (still being written by `report.sh`'s atomic rename pattern)
+  - Debounce: collapse events within 200ms window
+  - Startup scan: on launch, process any existing files in `events/` dir (recovery after restart)
+  - Periodic PID validation: every 30s, check if PIDs of Running agents are still alive via `ProcessHandle.of(pid).isPresent`; if dead, fire synthetic `sessionEnd` event
+  - Log: `[agent-pulse] Watching: ~/.agent-pulse/events/`
+  - Log: `[agent-pulse] Event: <agent>/<eventType> (PID <pid>)`
+
+  Core class structure:
   ```kotlin
-  val si = SystemInfo()
-  val os = si.operatingSystem
+  package com.agentpulse.watcher
 
-  fun scan(targetNames: List<String>): List<ProcessInfo> {
-      val allProcs = os.getProcesses(null, null) // Read-only OS call
-      return allProcs.filter { proc ->
-          targetNames.any { name ->
-              proc.name.contains(name, ignoreCase = true) ||
-              proc.commandLine.contains(name, ignoreCase = true)
-          }
-      }.map { proc ->
-          ProcessInfo(
-              pid = proc.processID,
-              name = proc.name,
-              commandLine = proc.commandLine,
-              exePath = proc.path.takeIf { it.isNotBlank() },
-              cpuPercent = proc.processCpuLoadCumulative * 100,
-              memoryBytes = proc.residentSetSize,
-              parentPid = proc.parentProcessID.takeIf { it > 0 },
-              startTime = proc.startTime,
-          )
-      }
-  }
-  ```
-
-- [ ] **3.2 Create FileWatcher.kt**
-    - Wraps `java.nio.file.WatchService` (JBR native FSEvents on macOS)
-    - `start(dirs: List<Path>, onEvent: () -> Unit)` — register each existing dir with ENTRY_CREATE, ENTRY_DELETE, ENTRY_MODIFY; poll in a coroutine loop
-    - Use `com.sun.nio.file.ExtendedWatchEventModifier.FILE_TREE` for recursive watching (JBR supports this on macOS)
-    - Print `[agent-pulse] Watching: {dir}` for each registered dir
-    - Debounce: collapse events within 500ms window before calling `onEvent()`
-    - **Read-only**: WatchService only observes filesystem events, never modifies files
-
-  Key pattern:
-  ```kotlin
-  val watchService = FileSystems.getDefault().newWatchService()
-
-  // JBR supports FILE_TREE for recursive watching on macOS
-  val fileTree = try {
-      Class.forName("com.sun.nio.file.ExtendedWatchEventModifier")
-          .getField("FILE_TREE").get(null) as WatchEvent.Modifier
-  } catch (e: Exception) { null }
-
-  for (dir in dirs) {
-      if (dir.exists()) {
-          val modifiers = if (fileTree != null) arrayOf(fileTree) else emptyArray()
-          dir.register(watchService,
-              arrayOf(ENTRY_CREATE, ENTRY_DELETE, ENTRY_MODIFY),
-              *modifiers)
-          println("[agent-pulse] Watching: $dir")
-      }
-  }
-  ```
-
-- [ ] **3.3 Create DetectionOrchestrator.kt**
-    - Holds `ProviderRegistry`, `ProcessScanner`, `FileWatcher`, `SearchIndexer`
-    - Exposes `val agents: StateFlow<List<Agent>>`
-    - `performScan()`: get process names from registry → scan with OSHI → pass to registry.scanAll() → update StateFlow → diff for indexer (add new, remove gone)
-    - `start()`: start FileWatcher (on FS event → performScan()), start periodic coroutine (every 5 seconds → performScan())
-    - Log: `[agent-pulse] Scan: N agents found`
-
-  ```kotlin
-  package com.agentpulse.detection
-
-  import com.agentpulse.model.Agent
-  import com.agentpulse.provider.ProviderRegistry
-  import com.agentpulse.search.SearchIndexer
+  import com.agentpulse.model.AgentType
+  import com.agentpulse.model.HookEvent
+  import com.agentpulse.provider.AgentStateManager
   import kotlinx.coroutines.*
-  import kotlinx.coroutines.flow.MutableStateFlow
-  import kotlinx.coroutines.flow.StateFlow
-  import kotlinx.coroutines.flow.asStateFlow
-  import java.nio.file.Path
-  import kotlin.io.path.Path
-  import kotlin.io.path.exists
+  import kotlinx.serialization.json.Json
+  import kotlinx.serialization.json.JsonObject
+  import java.nio.file.*
+  import kotlin.io.path.*
 
-  class DetectionOrchestrator(
-      private val registry: ProviderRegistry,
-      private val scanner: ProcessScanner,
-      private val indexer: SearchIndexer,
-      private val scanIntervalMs: Long = 5_000,
+  class HookEventWatcher(
+      private val stateManager: AgentStateManager,
+      private val eventsDir: Path = Path.of(System.getProperty("user.home"), ".agent-pulse", "events"),
   ) {
-      private val _agents = MutableStateFlow<List<Agent>>(emptyList())
-      val agents: StateFlow<List<Agent>> = _agents.asStateFlow()
-
-      private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-      private var watcher: FileWatcher? = null
+      private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+      private val json = Json { ignoreUnknownKeys = true }
 
       fun start() {
-          // Start file watcher on known agent directories
-          val watchDirs = listOf(
-              Path(System.getProperty("user.home"), ".copilot", "session-state"),
-              Path(System.getProperty("user.home"), ".claude"),
-              Path(System.getProperty("user.home"), ".codex", "sessions"),
-              Path(System.getProperty("user.home"), ".gemini", "tmp"),
-          ).filter { it.exists() }
+          Files.createDirectories(eventsDir)
+          processExistingFiles()  // Recovery after restart
+          startWatching()
+          startPidValidation()
+          println("[agent-pulse] Watching: $eventsDir")
+      }
 
-          watcher = FileWatcher().also { fw ->
-              scope.launch(Dispatchers.IO) {
-                  fw.start(watchDirs) { scope.launch { performScan() } }
-              }
-          }
+      private fun processExistingFiles() {
+          eventsDir.listDirectoryEntries("*.json")
+              .filter { !it.name.startsWith(".tmp.") }
+              .sortedBy { it.name }
+              .forEach { processFile(it) }
+      }
 
-          // Start periodic scan
+      private fun startWatching() {
           scope.launch {
+              val watchService = FileSystems.getDefault().newWatchService()
+              eventsDir.register(watchService, StandardWatchEventKinds.ENTRY_CREATE)
+
               while (isActive) {
-                  performScan()
-                  delay(scanIntervalMs)
+                  val key = watchService.poll(200, java.util.concurrent.TimeUnit.MILLISECONDS)
+                  if (key != null) {
+                      // Debounce: collect events within 200ms window
+                      delay(200)
+                      for (event in key.pollEvents()) {
+                          val filename = event.context() as? Path ?: continue
+                          val file = eventsDir.resolve(filename)
+                          if (file.name.endsWith(".json") && !file.name.startsWith(".tmp.")) {
+                              processFile(file)
+                          }
+                      }
+                      key.reset()
+                  }
               }
           }
       }
 
-      suspend fun performScan() {
+      private fun processFile(file: Path) {
           try {
-              val targetNames = registry.allProcessNames()
-              val processes = withContext(Dispatchers.IO) { scanner.scan(targetNames) }
-              val detected = registry.scanAll(processes)
-              val previous = _agents.value
+              if (!file.exists()) return
+              val parts = file.nameWithoutExtension.split("-", limit = 4)
+              if (parts.size != 4) return
 
-              _agents.value = detected
-              println("[agent-pulse] Scan: ${detected.size} agents found")
+              val (timestampStr, agentName, eventType, pidStr) = parts
+              val agent = parseAgentType(agentName) ?: return
+              val pid = pidStr.toIntOrNull() ?: return
+              val timestamp = timestampStr.toLongOrNull() ?: return
 
-              // Diff for search indexer
-              val previousIds = previous.map { it.id }.toSet()
-              val currentIds = detected.map { it.id }.toSet()
-              detected.filter { it.id !in previousIds }.forEach { indexer.add(it) }
-              previousIds.minus(currentIds).forEach { indexer.remove(it) }
+              val content = file.readText()
+              val rawJson = json.decodeFromString<JsonObject>(content)
+
+              val hookEvent = HookEvent(
+                  agent = agent,
+                  eventType = eventType,
+                  pid = pid,
+                  timestamp = timestamp,
+                  rawJson = rawJson,
+              )
+
+              stateManager.onEvent(hookEvent)
+              println("[agent-pulse] Event: $agentName/$eventType (PID $pid)")
+
+              file.deleteIfExists()  // Cleanup after processing
           } catch (e: Exception) {
-              System.err.println("[agent-pulse] Scan error: ${e.message}")
+              System.err.println("[agent-pulse] Failed to process ${file.name}: ${e.message}")
           }
+      }
+
+      private fun startPidValidation() {
+          scope.launch {
+              while (isActive) {
+                  delay(30_000)
+                  stateManager.agents.value
+                      .filter { it.status == com.agentpulse.model.AgentStatus.Running }
+                      .forEach { agent ->
+                          val alive = ProcessHandle.of(agent.pid.toLong()).isPresent
+                          if (!alive) {
+                              // Fire synthetic sessionEnd event
+                              val syntheticEvent = HookEvent(
+                                  agent = agent.agentType,
+                                  eventType = "sessionEnd",
+                                  pid = agent.pid,
+                                  timestamp = System.currentTimeMillis() / 1000,
+                                  rawJson = JsonObject(emptyMap()),
+                              )
+                              stateManager.onEvent(syntheticEvent)
+                              println("[agent-pulse] PID ${agent.pid} dead → synthetic sessionEnd")
+                          }
+                      }
+              }
+          }
+      }
+
+      private fun parseAgentType(name: String): AgentType? = when (name) {
+          "copilot-cli" -> AgentType.CopilotCli
+          "claude-code" -> AgentType.ClaudeCode
+          "cursor" -> AgentType.CursorIde
+          "codex-cli" -> AgentType.CodexCli
+          "gemini-cli" -> AgentType.GeminiCli
+          else -> null
       }
 
       fun stop() {
@@ -174,32 +177,157 @@
   }
   ```
 
-- [ ] **3.4 Wire into Main.kt**
-    - Create `ProviderRegistry`, register all stub providers
-    - Create `DetectionOrchestrator` with registry + `NoopIndexer`
-    - Call `orchestrator.start()` in a `LaunchedEffect`
-    - Pass `orchestrator.agents` to UI (for Step 5)
+- [ ] **3.2 Create HookDeployer.kt**
 
-- [ ] **3.5 Verify**
-    - Run `./gradlew run`
-    - Terminal shows `[agent-pulse] Watching: ...` and `[agent-pulse] Scan: 0 agents found`
-    - 0 is expected since providers are stubs
+  `src/main/kotlin/com/agentpulse/deploy/HookDeployer.kt`
 
-- [ ] **3.6 Commit, push, and open PR**
+  Responsibilities:
+  - On first run (with user consent), deploy shared hook infrastructure:
+    - Create `~/.agent-pulse/hooks/report.sh` (the POSIX shell script)
+    - Make it executable (`chmod +x` via `File.setExecutable`)
+    - Create `~/.agent-pulse/events/` directory
+  - Store deployment state in `~/.agent-pulse/config.json` (`"hooksDeployed": true`)
+  - **NOTE**: Agent-specific hook config deployment (Copilot CLI, Claude Code, Cursor, etc.) is handled in their respective steps (Steps 4, 6, 7, 8). This step only creates the shared infrastructure.
+  - Log: `[agent-pulse] Hook infrastructure deployed`
+
+  The `report.sh` script (~30ms, zero deps, POSIX shell):
+  ```sh
+  #!/bin/sh
+  mkdir -p "$HOME/.agent-pulse/events"
+  T=$(mktemp "$HOME/.agent-pulse/events/.tmp.XXXXXX")
+  cat > "$T"
+  mv "$T" "$HOME/.agent-pulse/events/$(date +%s)-$2-$1-$PPID.json"
+  ```
+  Arguments: `$1` = event_type, `$2` = agent_name. Stdin = JSON payload.
+  Uses atomic `mktemp` + `mv` so the watcher never reads a half-written file.
+
+  ```kotlin
+  package com.agentpulse.deploy
+
+  import kotlinx.serialization.json.*
+  import java.nio.file.Files
+  import java.nio.file.Path
+  import kotlin.io.path.*
+
+  class HookDeployer(
+      private val baseDir: Path = Path.of(System.getProperty("user.home"), ".agent-pulse"),
+  ) {
+      private val configFile = baseDir.resolve("config.json")
+      private val hooksDir = baseDir.resolve("hooks")
+      private val eventsDir = baseDir.resolve("events")
+      private val json = Json { prettyPrint = true; ignoreUnknownKeys = true }
+
+      private val reportShContent = """
+          |#!/bin/sh
+          |mkdir -p "${'$'}HOME/.agent-pulse/events"
+          |T=${'$'}(mktemp "${'$'}HOME/.agent-pulse/events/.tmp.XXXXXX")
+          |cat > "${'$'}T"
+          |mv "${'$'}T" "${'$'}HOME/.agent-pulse/events/${'$'}(date +%s)-${'$'}2-${'$'}1-${'$'}PPID.json"
+      """.trimMargin() + "\n"
+
+      fun deployIfNeeded() {
+          if (isDeployed()) return
+          deploy()
+      }
+
+      private fun isDeployed(): Boolean {
+          if (!configFile.exists()) return false
+          return try {
+              val config = json.decodeFromString<JsonObject>(configFile.readText())
+              config["hooksDeployed"]?.let {
+                  (it as? JsonPrimitive)?.booleanOrNull == true
+              } ?: false
+          } catch (e: Exception) { false }
+      }
+
+      private fun deploy() {
+          Files.createDirectories(hooksDir)
+          Files.createDirectories(eventsDir)
+
+          // Write report.sh
+          val reportSh = hooksDir.resolve("report.sh")
+          reportSh.writeText(reportShContent)
+          reportSh.toFile().setExecutable(true)
+
+          // Mark as deployed
+          val config = if (configFile.exists()) {
+              try { json.decodeFromString<JsonObject>(configFile.readText()) }
+              catch (e: Exception) { JsonObject(emptyMap()) }
+          } else {
+              JsonObject(emptyMap())
+          }
+
+          val updated = JsonObject(config.toMutableMap().apply {
+              put("hooksDeployed", JsonPrimitive(true))
+          })
+          configFile.writeText(json.encodeToString(JsonObject.serializer(), updated))
+
+          println("[agent-pulse] Hook infrastructure deployed")
+      }
+  }
+  ```
+
+- [ ] **3.3 Wire into Main.kt**
+  - Create `AgentStateManager` with all stub providers from Step 2
+  - Create `HookDeployer()` — call `deployIfNeeded()` on first launch
+  - Create `HookEventWatcher(stateManager)` — call `start()` in a `LaunchedEffect`
+  - Pass `stateManager.agents` to UI (for Step 5)
+
+  Key wiring in `Main.kt`:
+  ```kotlin
+  val providers = listOf(
+      CopilotCliProvider(),
+      ClaudeCodeProvider(),
+      CursorProvider(),
+      CodexProvider(),
+      GeminiProvider(),
+  )
+  val stateManager = AgentStateManager(providers)
+
+  // Deploy hook infrastructure on first run
+  HookDeployer().deployIfNeeded()
+
+  // Start event watcher
+  val watcher = HookEventWatcher(stateManager)
+
+  // Inside Compose application:
+  LaunchedEffect(Unit) {
+      watcher.start()
+  }
+
+  // Pass stateManager.agents to UI composables (for Step 5)
+  ```
+
+- [ ] **3.4 Verify**
+  - Run `./gradlew run`
+  - Terminal shows `[agent-pulse] Watching: ~/.agent-pulse/events/`
+  - Manually create a test event file:
+    ```bash
+    echo '{"test":true}' > ~/.agent-pulse/events/$(date +%s)-copilot-cli-sessionStart-$$.json
+    ```
+  - Terminal shows `[agent-pulse] Event: copilot-cli/sessionStart (PID <your-pid>)`
+  - File is deleted after processing
+  - Verify `~/.agent-pulse/hooks/report.sh` exists and is executable
+  - Verify `~/.agent-pulse/config.json` contains `"hooksDeployed": true`
+
+- [ ] **3.5 Commit, push, and open PR**
   ```bash
-  git checkout -b step-3-detection
+  git checkout -b step-3-watcher
   # ... implement, then:
-  git add -A && git commit -m "feat: process scanner and file watcher detection engine
+  git add -A && git commit -m "feat: hook event watcher and deployer
 
-  - ProcessScanner: OSHI process detection with tree building
-  - FileWatcher: JBR WatchService with FILE_TREE recursive watching
-  - DetectionOrchestrator: scan → update StateFlow → search indexer
-  - 5-second periodic scan + FS-event-triggered scan
-  - All agent data access is read-only
+  - HookEventWatcher: JBR WatchService on ~/.agent-pulse/events/
+  - Filename parsing: <timestamp>-<agent>-<eventType>-<ppid>.json
+  - Startup recovery scan for existing event files
+  - PID validation every 30s with synthetic sessionEnd
+  - 200ms debounce, .tmp. file exclusion, cleanup after processing
+  - HookDeployer: report.sh creation and events directory setup
+  - Deployment state tracked in ~/.agent-pulse/config.json
+  - Wired into Main.kt with AgentStateManager
 
   Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
-  git push -u origin step-3-detection
-  gh pr create --title "Step 3: Detection engine" \
-    --body "OSHI process scanner, JBR WatchService file watcher, detection orchestrator with StateFlow." \
+  git push -u origin step-3-watcher
+  gh pr create --title "Step 3: Hook event watcher + deployer" \
+    --body "HookEventWatcher (JBR FileWatch, filename parsing, startup recovery, PID liveness), HookDeployer (report.sh, events dir, config.json)." \
     --base main
   ```

@@ -31,6 +31,8 @@ This is a non-negotiable safety constraint that applies to every layer of the ap
 | **OTLP receiver** | RECEIVE data only — never push data to agents | Passive listener on localhost; agents push to us, we never push to them |
 | **Agent config** | NEVER modify agent configuration files | Read `config.json`, `settings.json`, etc. but never write to them |
 
+**MVP relevance:** For the hooks+FileWatch MVP, the primary safety concerns are File system reading (hook event files in `~/.agent-pulse/events/`) and File watching. The SQLite, OSHI, and OTLP rules apply when implementing the post-MVP enrichment layer.
+
 **SQLite read-only checklist** (applies to ALL database access):
 ```kotlin
 // ✅ CORRECT — read-only connection
@@ -67,6 +69,12 @@ Files.write(path, bytes)
 This is a one-time setup. The hook configs reference `~/.agent-pulse/hooks/report.sh` which only writes to `~/.agent-pulse/events/`.
 
 ### ⚠️ Safe Reading from Mid-Write Files (CRITICAL)
+
+> **ℹ️ POST-MVP — Enrichment Layer**
+> The content below applies to the **post-MVP enrichment layer** where agent-pulse reads agent-owned
+> files (SQLite databases, JSONL logs, config files). In the **MVP** (hooks+FileWatch), agent-pulse
+> only reads files in `~/.agent-pulse/events/` which it controls, so mid-write safety is not a concern.
+> Keep this section for future reference when implementing enrichment providers.
 
 Agent files are actively being written to by the agents while agent-pulse reads them. This is the central reliability challenge of the entire application. **If we don't handle this correctly, the app will show corrupt data, crash, or silently miss agents.**
 
@@ -243,6 +251,10 @@ suspend fun safeReadDb(dbPath: Path, sql: String): List<Map<String, String>> = t
 ```
 
 ### Connection Hygiene for SQLite
+
+> **ℹ️ POST-MVP — Enrichment Layer**
+> This section applies to the post-MVP enrichment layer where agent-pulse reads agent-owned SQLite
+> databases. The MVP does not open any agent databases.
 
 Agent databases (Cursor's `state.vscdb`, Copilot's `session.db`) are actively being written to by the agents. agent-pulse must:
 1. **Open → read → close immediately.** Never hold connections open. The `DriverManager.getConnection().use { }` pattern ensures this. Connection overhead (~1-5ms) is negligible at our 2-5s poll frequency.

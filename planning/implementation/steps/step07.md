@@ -1,155 +1,121 @@
 # Step 7: cursor — Cursor hook provider
 
-> **⚠️ NEEDS REVISION FOR HOOKS+FILEWATCH MVP**
-> Replace process scanning + SQLite reading with hook-based monitoring:
-> - Deploy Cursor hooks: `~/.cursor/hooks.json` (v1.7+ first-class hooks)
-> - Parse sessionStart/afterFileEdit/postToolUse/beforeShellExecution events
-> - Session ID from `conversation_id` in payload
-> - Remove state.vscdb SQLite reading — deferred to post-MVP
-> - Remove ai-code-tracking.db reading — deferred
-> - Remove JSONL transcript reading — deferred
-
 > **⚠️ READ `shared-context.md` FIRST** — it contains all design principles, architecture,
-> SQLite safety rules, connection hygiene, tech stack, and project structure that apply to this step.
+> and project structure that apply to this step.
 > Path: `planning/implementation/shared-context.md`
 
 ---
 
+**Goal**: Deploy Cursor hook config and implement `CursorProvider.processEvent()` so that Cursor AI activity is captured via hooks and flows through the dashboard.
 
-**Goal**: Detect Cursor sessions via process scanning and read rich metadata from Cursor's SQLite databases and JSONL transcripts.
+**Pre-check**: Step 6 PR is merged. `git checkout main && git pull`.
 
-**Pre-check**: Step 6 PR is merged.
+**App state AFTER this step**: When Cursor AI features are used (chat, edits, tool calls), events flow through hooks → `report.sh` → event files → FileWatcher → `CursorProvider.processEvent()` → dashboard. Cursor sessions appear in the agent list with session identity from `conversation_id`, file-edit tracking, and event counts.
 
-**This provider reads the most databases — read-only safety is critical.**
+---
 
-**Data sources** (all read-only, verified from live Cursor installation):
+- [ ] **7.1 Deploy Cursor hook config**
+    - Cursor v1.7+ supports first-class hooks via `~/.cursor/hooks.json` (global) or `.cursor/hooks.json` (project-level)
+    - Supported events: `sessionStart`, `afterFileEdit`, `postToolUse`, `beforeShellExecution`, `afterShellExecution`
+    - Hook receives JSON on stdin with `conversation_id`, tool details, file path, etc.
+    - `conversation_id` in the payload = unique session ID per Cursor conversation
+    - `$PPID` in hook shell = Cursor's process PID
+    - Create `~/.cursor/hooks.json` (or merge into existing if the file already exists):
+      ```json
+      {
+        "hooks": {
+          "sessionStart": [
+            { "command": "$HOME/.agent-pulse/hooks/report.sh sessionStart cursor" }
+          ],
+          "afterFileEdit": [
+            { "command": "$HOME/.agent-pulse/hooks/report.sh afterFileEdit cursor" }
+          ],
+          "postToolUse": [
+            { "command": "$HOME/.agent-pulse/hooks/report.sh postToolUse cursor" }
+          ]
+        }
+      }
+      ```
+    - Add deployment logic to `HookDeployer.deployCursorHooks()`:
+        - Read existing `~/.cursor/hooks.json` if present
+        - Merge agent-pulse hook entries into each event array (avoid duplicates)
+        - Write the merged config back
+        - Log the deployed hook config path
 
-| Source | Path | Format | Read Method |
-|---|---|---|---|
-| Process | `Cursor`, `Cursor Helper` | OSHI | Process scan |
-| Workspace state | `~/Library/Application Support/Cursor/User/workspaceStorage/<hash>/state.vscdb` | SQLite | `ReadOnlyDb` |
-| AI tracking | `~/.cursor/ai-tracking/ai-code-tracking.db` | SQLite | `ReadOnlyDb` |
-| Agent transcripts | `~/.cursor/projects/<path-hash>/agent-transcripts/<composerId>/<composerId>.jsonl` | JSONL | `SafeFileReader.readJsonl()` |
-| App logs | `~/Library/Application Support/Cursor/logs/<date>/main.log` | Text | `SafeFileReader.readLines()` (tail) |
-
-- [ ] **7.1 Implement CursorProvider.scan()**
-    - Detect Cursor process via OSHI (name: `Cursor`)
-    - Enumerate workspace storage directories to find `state.vscdb` files
-    - For each `state.vscdb`, read `composer.composerData` from `ItemTable` (key-value table)
-    - Parse JSON blob to extract: composerId, name, unifiedMode, totalLinesAdded/Removed, filesChangedCount, createdAt, lastUpdatedAt, contextUsagePercent
+- [ ] **7.2 Implement CursorProvider.processEvent()**
+    - Replace the stub provider with full Cursor-specific event handling
+    - Session identity: use `conversation_id` from the hook JSON payload (falls back to PID)
+    - Track file edits: count edits, record last-edited file in `extra`
+    - Handle `sessionStart`, `afterFileEdit`, and generic events (e.g. `postToolUse`)
 
   ```kotlin
   class CursorProvider : AgentProvider {
-      private val home = Path.of(System.getProperty("user.home"))
+      override val agentType = AgentType.CursorIde
 
-      override val name = "Cursor"
-      override val agentType = AgentType.Cursor
-      override val watchDirs = emptyList<Path>() // Dynamic: discovered via process
-      override val processNames = listOf("Cursor")
+      override fun processEvent(event: HookEvent, currentState: AgentState?): AgentState {
+          val conversationId = event.rawJson["conversation_id"]?.jsonPrimitive?.contentOrNull
+          val sessionId = conversationId ?: event.pid.toString()
 
-      override fun scan(processes: List<ProcessInfo>): List<Agent> {
-          val cursorProcs = processes.filter { it.name.equals("Cursor", ignoreCase = true) }
-          if (cursorProcs.isEmpty()) return emptyList()
-
-          val mainProc = cursorProcs.firstOrNull() ?: return emptyList()
-          val agents = mutableListOf<Agent>()
-
-          // Enumerate workspace storage directories
-          val wsStorageDir = home.resolve("Library/Application Support/Cursor/User/workspaceStorage")
-          if (!wsStorageDir.exists()) return listOf(processOnlyAgent(mainProc))
-
-          wsStorageDir.listDirectoryEntries().filter { it.isDirectory() }.forEach { wsDir ->
-              val stateDb = wsDir.resolve("state.vscdb")
-              if (!stateDb.exists()) return@forEach
-
-              // Read composer data from ItemTable key-value store
-              val composerJson = runBlocking {
-                  ReadOnlyDb.readKv(stateDb, "ItemTable", "composer.composerData")
-              } ?: return@forEach
-
-              try {
-                  val root = Json.parseToJsonElement(composerJson).jsonObject
-                  val composers = root["allComposers"]?.jsonArray ?: return@forEach
-
-                  for (composer in composers) {
-                      val obj = composer.jsonObject
-                      val isArchived = obj["isArchived"]?.jsonPrimitive?.booleanOrNull ?: false
-                      if (isArchived) continue
-
-                      val composerId = obj["composerId"]?.jsonPrimitive?.contentOrNull ?: continue
-                      val cName = obj["name"]?.jsonPrimitive?.contentOrNull ?: "Cursor session"
-                      val mode = obj["unifiedMode"]?.jsonPrimitive?.contentOrNull ?: "chat"
-                      val linesAdded = obj["totalLinesAdded"]?.jsonPrimitive?.longOrNull ?: 0
-                      val linesRemoved = obj["totalLinesRemoved"]?.jsonPrimitive?.longOrNull ?: 0
-                      val createdAt = obj["createdAt"]?.jsonPrimitive?.longOrNull ?: 0
-
-                      agents.add(Agent(
-                          id = "Cursor:$composerId",
-                          agentType = AgentType.Cursor,
-                          status = AgentStatus.Running,
-                          pid = mainProc.pid,
-                          sessionId = composerId,
-                          cwd = null,
-                          model = null,
-                          summary = "$cName ($mode)",
-                          startTime = createdAt,
-                          cpuPercent = mainProc.cpuPercent,
-                          memoryBytes = mainProc.memoryBytes,
-                          extra = mapOf(
-                              "mode" to mode,
-                              "linesAdded" to linesAdded.toString(),
-                              "linesRemoved" to linesRemoved.toString(),
-                              "contextUsage" to (obj["contextUsagePercent"]?.jsonPrimitive?.contentOrNull ?: ""),
-                          ),
-                      ))
-                  }
-              } catch (e: Exception) {
-                  System.err.println("[agent-pulse] Cursor composer parse error: ${e.message}")
+          return when (event.eventType) {
+              "sessionStart" -> AgentState(
+                  id = "${agentType.name}_$sessionId",
+                  name = "Cursor — ${conversationId?.take(8) ?: "PID ${event.pid}"}",
+                  agentType = agentType,
+                  status = AgentStatus.Running,
+                  pid = event.pid,
+                  sessionId = conversationId,
+                  eventCount = 1,
+                  lastActivity = event.timestamp * 1000,
+              )
+              "afterFileEdit" -> {
+                  val filePath = event.rawJson["file_path"]?.jsonPrimitive?.contentOrNull
+                  currentState?.copy(
+                      eventCount = currentState.eventCount + 1,
+                      lastActivity = event.timestamp * 1000,
+                      extra = currentState.extra + buildMap {
+                          filePath?.let { put("lastEditedFile", it) }
+                          put("fileEdits", ((currentState.extra["fileEdits"]?.toIntOrNull() ?: 0) + 1).toString())
+                      },
+                  ) ?: fallbackState(event, sessionId)
               }
+              else -> currentState?.copy(
+                  eventCount = (currentState.eventCount) + 1,
+                  lastActivity = event.timestamp * 1000,
+              ) ?: fallbackState(event, sessionId)
           }
-          return agents.ifEmpty { listOf(processOnlyAgent(mainProc)) }
       }
 
-      override fun enrich(agent: Agent): Agent {
-          // Read ai-code-tracking.db for conversation summaries
-          val trackingDb = home.resolve(".cursor/ai-tracking/ai-code-tracking.db")
-          if (!trackingDb.exists()) return agent
-
-          val summaries = runBlocking {
-              ReadOnlyDb.query(trackingDb,
-                  "SELECT title, tldr, model FROM conversation_summaries WHERE conversationId = '${agent.sessionId}' LIMIT 1"
-              ) { rs ->
-                  Triple(rs.getString("title"), rs.getString("tldr"), rs.getString("model"))
-              }
-          }
-          val (title, tldr, model) = summaries.firstOrNull() ?: return agent
-          return agent.copy(
-              model = model.takeIf { it.isNotBlank() } ?: agent.model,
-              extra = agent.extra + mapOf(
-                  "title" to (title ?: ""),
-                  "tldr" to (tldr ?: ""),
-              ),
-          )
-      }
-
-      private fun processOnlyAgent(proc: ProcessInfo) = Agent(
-          id = "Cursor:${proc.pid}",
-          agentType = AgentType.Cursor,
+      private fun fallbackState(event: HookEvent, sessionId: String) = AgentState(
+          id = "${agentType.name}_$sessionId",
+          name = "Cursor — ${sessionId.take(8)}",
+          agentType = agentType,
           status = AgentStatus.Running,
-          pid = proc.pid,
-          sessionId = proc.pid.toString(),
-          startTime = proc.startTime,
-          cpuPercent = proc.cpuPercent,
-          memoryBytes = proc.memoryBytes,
+          pid = event.pid,
+          sessionId = sessionId,
+          eventCount = 1,
+          lastActivity = event.timestamp * 1000,
       )
   }
   ```
 
-- [ ] **7.2 Implement CursorProvider.enrich()** — already included above
-    - Read `ai-code-tracking.db` for conversation summaries and scored commits
-    - Read agent transcript JSONL for conversation history summary (count messages, last user message)
-    - **All reads use ReadOnlyDb or SafeFileReader — never write**
-
-- [ ] **7.3 Verify** — Run with Cursor sessions, verify detection
+- [ ] **7.3 Verify** — Run agent-pulse, open Cursor, use AI features (chat, edit, tool use), confirm:
+    - Hook events land in `~/.agent-pulse/events/` as JSON files
+    - Dashboard shows Cursor session(s) with correct name, event count, and last-activity timestamp
+    - File edits are tracked (`fileEdits` count and `lastEditedFile` in extra)
 
 - [ ] **7.4 Commit, push, and open PR**
+  ```bash
+  git checkout -b step-7-cursor-provider
+  git add -A && git commit -m "feat: Cursor hook provider with processEvent()
+
+  - Deploy ~/.cursor/hooks.json for sessionStart, afterFileEdit, postToolUse
+  - HookDeployer.deployCursorHooks() with merge-if-exists logic
+  - CursorProvider.processEvent() with conversation_id session identity
+  - Track file edits count and last-edited file in extra map
+
+  Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+  git push -u origin step-7-cursor-provider
+  gh pr create --title "Step 7: Cursor hook provider" \
+    --body "Deploy Cursor hook config, implement CursorProvider.processEvent() with conversation_id session identity and file-edit tracking." \
+    --base main
+  ```

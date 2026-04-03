@@ -1,113 +1,112 @@
 # Step 6: claude — Claude Code hook provider
 
-> **⚠️ NEEDS REVISION FOR HOOKS+FILEWATCH MVP**
-> Replace process scanning + file reading with hook-based monitoring:
-> - Deploy Claude Code hooks: merge into `~/.claude/settings.json` (use jq in installer)
-> - Use PostToolUse hooks only (not PreToolUse — avoid interfering with tool authorization)
-> - Parse SessionStart/PostToolUse events
-> - Session ID from payload or session-health directory lookup
-> - Remove MEMORY.md reading — deferred to post-MVP
-> - Remove OTel integration — deferred to post-MVP
-
 > **⚠️ READ `shared-context.md` FIRST** — it contains all design principles, architecture,
-> SQLite safety rules, connection hygiene, tech stack, and project structure that apply to this step.
+> and project structure that apply to this step.
 > Path: `planning/implementation/shared-context.md`
 
 ---
 
+**Goal**: Deploy Claude Code hook config (merged into `~/.claude/settings.json`) and implement `ClaudeCodeProvider.processEvent()` so that Claude Code tool-use events flow through hooks into the dashboard.
 
-**Goal**: Detect running Claude Code sessions via process scanning and file-based metadata.
+**Pre-check**: Step 5 PR is merged. `git checkout main && git pull`. `./gradlew build` passes.
 
-**Pre-check**: Step 5 PR is merged.
+**App state AFTER this step**: When Claude Code uses tools, the `PostToolUse` hook fires, writing an event file. FileWatcher picks it up, routes it through `ClaudeCodeProvider.processEvent()`, and the dashboard shows the session with an incrementing event count and last-activity timestamp. Each tool use updates the session state in real time.
 
-**Data sources** (all read-only):
+---
 
-| File | Format | Key Data |
-|---|---|---|
-| Process: `claude` | OSHI | PID, CWD, CPU/memory |
-| `~/.claude/projects/<hash>/memory/MEMORY.md` | Markdown | Project context/memory |
-| `~/.claude/settings.json` | JSON | Configuration |
-| `~/.claude/CLAUDE.md` | Markdown | Global instructions |
-| `<project>/.claude/settings.json` | JSON | Project permissions, tool config |
-| `~/.claude/debug/<uuid>.txt` | Text | Debug logs |
-
-- [ ] **6.1 Implement ClaudeCodeProvider**
-    - Process detection: scan for `claude` by name
-    - For each matched process, extract CWD
-    - Compute project hash from CWD to find `~/.claude/projects/<hash>/`
-    - Read MEMORY.md for project description (first 200 chars as summary)
-    - Read debug logs for activity timestamps
-    - Detect VS Code parentage via process tree (parent = `Code Helper (Plugin)`)
-
-  ```kotlin
-  class ClaudeCodeProvider : AgentProvider {
-      private val home = Path.of(System.getProperty("user.home"))
-
-      override val name = "Claude Code"
-      override val agentType = AgentType.ClaudeCode
-      override val watchDirs = listOf(home.resolve(".claude"))
-      override val processNames = listOf("claude", "claude-code")
-
-      override fun scan(processes: List<ProcessInfo>): List<Agent> {
-          return processes.filter { proc ->
-              processNames.any { proc.name.contains(it, ignoreCase = true) }
-          }.map { proc ->
-              // Determine if this is a VS Code extension or standalone CLI
-              val isVsCode = processes.any { parent ->
-                  parent.pid == proc.parentPid &&
-                  parent.name.contains("Code Helper", ignoreCase = true)
-              }
-              val type = if (isVsCode) AgentType.ClaudeCodeVsCode else AgentType.ClaudeCode
-
-              // Try to find project directory via CWD
-              val projectDir = findProjectDir(proc)
-              val memory = projectDir?.resolve("memory/MEMORY.md")
-                  ?.let { SafeFileReader.readText(it)?.take(200) }
-
-              Agent(
-                  id = "${type.name}:${proc.pid}",
-                  agentType = type,
-                  status = AgentStatus.Running,
-                  pid = proc.pid,
-                  sessionId = proc.pid.toString(),
-                  cwd = null, // Claude doesn't expose CWD easily; use project dir if found
-                  model = null, // Not available from files (available via OTel in Step 9)
-                  summary = memory?.lines()?.firstOrNull()?.removePrefix("# ")?.trim(),
-                  startTime = proc.startTime,
-                  cpuPercent = proc.cpuPercent,
-                  memoryBytes = proc.memoryBytes,
-              )
-          }
+- [ ] **6.1 Deploy Claude Code hook config**
+    - Read existing `~/.claude/settings.json` (may contain permissions, allowedTools, etc.)
+    - Merge a `hooks` section into it — add agent-pulse entries without removing any existing hooks
+    - Write the merged file back
+    - If the file doesn't exist, create it with only the hooks section
+    - Hook config to merge:
+      ```json
+      {
+        "hooks": {
+          "PostToolUse": [
+            {
+              "type": "command",
+              "command": "$HOME/.agent-pulse/hooks/report.sh PostToolUse claude-code"
+            }
+          ]
+        }
       }
+      ```
+    - We only use `PostToolUse` — not `PreToolUse`, to avoid interfering with Claude Code's tool authorization flow
+    - Add this logic to `HookDeployer.deployClaudeCodeHooks()`:
+      1. Parse existing JSON (or start with empty `JsonObject`)
+      2. Get or create `hooks` object
+      3. Get or create `PostToolUse` array inside `hooks`
+      4. Append the agent-pulse entry if not already present (match on `command` string containing `agent-pulse`)
+      5. Write back with `prettyPrint = true`
+    - MUST NOT overwrite the file — always read-merge-write
 
-      override fun enrich(agent: Agent): Agent {
-          // Read latest debug log for activity timestamp
-          val debugDir = home.resolve(".claude/debug")
-          val latestDebug = SafeFileReader.listDirectory(debugDir)
-              ?.maxByOrNull { it.fileName.toString() }
-          val lastActivity = latestDebug?.let {
-              try { java.nio.file.Files.getLastModifiedTime(it).toMillis() }
-              catch (e: Exception) { null }
-          }
-          return if (lastActivity != null) {
-              agent.copy(extra = agent.extra + ("lastActivity" to lastActivity.toString()))
-          } else agent
-      }
+- [ ] **6.2 Implement ClaudeCodeProvider.processEvent()**
+    - Create `src/main/kotlin/com/agentpulse/provider/ClaudeCodeProvider.kt`
+    - Replace the stub from Step 2 with the full implementation
+    - The first event for a given PID is treated as a synthetic session start (no separate `SessionStart` hook needed)
+    - Extract `tool_name` from the hook JSON payload for display in `extra`
+    - Track cumulative `toolCalls` count in `extra`
+    ```kotlin
+    package com.agentpulse.provider
 
-      private fun findProjectDir(proc: ProcessInfo): Path? {
-          // Claude stores projects at ~/.claude/projects/<hash>/
-          // The hash is derived from the project path; we scan all and match by recency
-          val projectsDir = home.resolve(".claude/projects")
-          if (!projectsDir.exists()) return null
-          return try {
-              projectsDir.listDirectoryEntries()
-                  .filter { it.isDirectory() && it.resolve("memory/MEMORY.md").exists() }
-                  .maxByOrNull { java.nio.file.Files.getLastModifiedTime(it).toMillis() }
-          } catch (e: Exception) { null }
-      }
-  }
-  ```
+    import com.agentpulse.model.*
+    import kotlinx.serialization.json.contentOrNull
+    import kotlinx.serialization.json.jsonPrimitive
 
-- [ ] **6.2 Verify** — Run with Claude Code active, verify detection
+    class ClaudeCodeProvider : AgentProvider {
+        override val agentType = AgentType.ClaudeCode
 
-- [ ] **6.3 Commit, push, and open PR**
+        override fun processEvent(event: HookEvent, currentState: AgentState?): AgentState {
+            val toolName = event.rawJson["tool_name"]?.jsonPrimitive?.contentOrNull
+
+            if (currentState == null) {
+                // First event for this PID = session start
+                return AgentState(
+                    id = "${agentType.name}_${event.pid}",
+                    name = "Claude Code — PID ${event.pid}",
+                    agentType = agentType,
+                    status = AgentStatus.Running,
+                    pid = event.pid,
+                    eventCount = 1,
+                    lastActivity = event.timestamp * 1000,
+                    extra = buildMap { toolName?.let { put("lastTool", it) } },
+                )
+            }
+
+            return currentState.copy(
+                eventCount = currentState.eventCount + 1,
+                lastActivity = event.timestamp * 1000,
+                extra = currentState.extra + buildMap {
+                    toolName?.let { put("lastTool", it) }
+                    put("toolCalls", ((currentState.extra["toolCalls"]?.toIntOrNull() ?: 0) + 1).toString())
+                },
+            )
+        }
+    }
+    ```
+    - Note: PPID of the hook process is Claude Code's PID — the hook script captures `$PPID` and encodes it in the event filename
+
+- [ ] **6.3 Verify end-to-end**
+    - Run `./gradlew build` — must compile with zero errors
+    - Start agent-pulse: `./gradlew run`
+    - Open Claude Code and trigger any tool use (e.g. read a file)
+    - Confirm an event file appears in `~/.agent-pulse/events/`
+    - Confirm the dashboard shows a Claude Code session with event count incrementing on each tool use
+
+- [ ] **6.4 Commit, push, and open PR**
+    ```bash
+    git checkout -b step-6-claude-code-provider
+    git add -A && git commit -m "feat: Claude Code hook provider
+
+    - Deploy PostToolUse hook config merged into ~/.claude/settings.json
+    - Implement ClaudeCodeProvider.processEvent() with session detection
+    - First event per PID treated as synthetic session start
+    - Track tool name, tool call count, and last activity
+
+    Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+    git push -u origin step-6-claude-code-provider
+    gh pr create --title "Step 6: Claude Code hook provider" \
+      --body "Deploys PostToolUse hook (merged into settings.json) and implements ClaudeCodeProvider.processEvent()." \
+      --base main
+    ```

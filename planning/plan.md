@@ -321,7 +321,7 @@ Gradle wrapper is committed to the repo — no global Gradle install needed. JBR
 **This plan is executed ONE STEP AT A TIME, not all at once.**
 
 When an implementation agent is given this plan:
-1. **Read final-plan.md** to find the next pending step (the first step NOT marked `[DONE]`)
+1. **Read plan.md** to find the next pending step (the first step NOT marked `[DONE]`)
 2. **Execute ONLY that one step** — follow all its sub-tasks, verify, create the branch, commit, push, and open the PR
 3. **Mark the step as done** by changing `### Step N:` to `### Step N: [DONE]`
 4. **STOP.** Do not proceed to the next step.
@@ -329,7 +329,7 @@ When an implementation agent is given this plan:
 
 **CRITICAL — Merge gate**: Before starting any step, run `gh pr list --state open`. If ANY step PR is still open, DO NOT start the next step.
 
-**The plan is the single source of truth.** If PR review changes anything, update final-plan.md to match reality.
+**The plan is the single source of truth.** If PR review changes anything, update plan.md to match reality.
 
 ---
 
@@ -337,7 +337,7 @@ When an implementation agent is given this plan:
 
 1. Open terminal in the project root directory
 2. Check what's done: `git --no-pager log --oneline main`
-3. Check final-plan.md: steps marked `[DONE]` are complete
+3. Check plan.md: steps marked `[DONE]` are complete
 4. Start the next pending step
 5. Steps are sequential — don't skip ahead
 

@@ -480,8 +480,7 @@ agent-pulse/
 │   │   │   └── HookEvent.kt
 │   │   ├── provider/
 │   │   │   ├── AgentProvider.kt
-│   │   │   ├── HookEventStore.kt
-│   │   │   ├── ProviderRegistry.kt
+│   │   │   ├── AgentStateManager.kt
 │   │   │   ├── CopilotCliProvider.kt       (Step 4)
 │   │   │   ├── ClaudeCodeProvider.kt       (Step 6)
 │   │   │   ├── CursorProvider.kt           (Step 7)

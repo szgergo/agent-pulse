@@ -121,16 +121,16 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
               val (timestampStr, agentName, eventType, pidStr) = parts
               val agent = parseAgentType(agentName) ?: return
               val pid = pidStr.toIntOrNull() ?: return
-              val timestamp = timestampStr.toLongOrNull() ?: return
+              val epochSeconds = timestampStr.toLongOrNull() ?: return
 
               val content = file.readText()
               val payload = parsePayload(agent, content)
 
               val hookEvent = HookEvent(
                   agent = agent,
-                  eventType = eventType,
+                  eventType = HookEventType.fromRaw(eventType),
                   pid = pid,
-                  timestamp = timestamp,
+                  timestamp = Instant.ofEpochSecond(epochSeconds),
                   payload = payload,
               )
 

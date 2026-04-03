@@ -8,11 +8,11 @@
 
 ---
 
-**Goal**: Deploy Claude Code hook config (merged into `~/.claude/settings.json`) and implement `ClaudeCodeProvider.processEvent()` so that Claude Code tool-use events flow through hooks into the dashboard.
+**Goal**: Deploy Claude Code hook config (merged into `~/.claude/settings.json`) and implement `ClaudeCodeProvider.reconcileAgentState()` so that Claude Code tool-use events flow through hooks into the dashboard.
 
 **Pre-check**: Step 5 PR is merged. `git checkout main && git pull`. `./gradlew build` passes.
 
-**App state AFTER this step**: When Claude Code uses tools, the `PostToolUse` hook fires, writing an event file. FileWatcher picks it up, routes it through `ClaudeCodeProvider.processEvent()`, and the dashboard shows the session with an incrementing event count and last-activity timestamp. Each tool use updates the session state in real time.
+**App state AFTER this step**: When Claude Code uses tools, the `PostToolUse` hook fires, writing an event file. FileWatcher picks it up, routes it through `ClaudeCodeProvider.reconcileAgentState()`, and the dashboard shows the session with an incrementing event count and last-activity timestamp. Each tool use updates the session state in real time.
 
 ---
 
@@ -43,7 +43,7 @@
       5. Write back with `prettyPrint = true`
     - MUST NOT overwrite the file — always read-merge-write
 
-- [ ] **6.2 Implement ClaudeCodeProvider.processEvent()**
+- [ ] **6.2 Implement ClaudeCodeProvider.reconcileAgentState()**
     - Create `src/main/kotlin/com/agentpulse/provider/ClaudeCodeProvider.kt`
     - Replace the stub from Step 2 with the full implementation
     - The first event for a given PID is treated as a synthetic session start (no separate `SessionStart` hook needed)
@@ -58,7 +58,7 @@
     class ClaudeCodeProvider : AgentProvider {
         override val agentType = AgentType.ClaudeCode
 
-        override fun processEvent(event: HookEvent, currentState: AgentState?): AgentState {
+        override fun reconcileAgentState(event: HookEvent, currentState: AgentState?): AgentState {
             val p = event.payload as ClaudePayload
             val toolName = p.toolName   // @SerialName("tool_name") handles the mapping
 
@@ -71,14 +71,14 @@
                     status = AgentStatus.Running,
                     pid = event.pid,
                     eventCount = 1,
-                    lastActivity = event.timestamp * 1000,
+                    lastActivity = event.timestamp,
                     extra = buildMap { toolName?.let { put("lastTool", it) } },
                 )
             }
 
             return currentState.copy(
                 eventCount = currentState.eventCount + 1,
-                lastActivity = event.timestamp * 1000,
+                lastActivity = event.timestamp,
                 extra = currentState.extra + buildMap {
                     toolName?.let { put("lastTool", it) }
                     put("toolCalls", ((currentState.extra["toolCalls"]?.toIntOrNull() ?: 0) + 1).toString())
@@ -102,13 +102,13 @@
     git add -A && git commit -m "feat: Claude Code hook provider
 
     - Deploy PostToolUse hook config merged into ~/.claude/settings.json
-    - Implement ClaudeCodeProvider.processEvent() with session detection
+    - Implement ClaudeCodeProvider.reconcileAgentState() with session detection
     - First event per PID treated as synthetic session start
     - Track tool name, tool call count, and last activity
 
     Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
     git push -u origin step-6-claude-code-provider
     gh pr create --title "Step 6: Claude Code hook provider" \
-      --body "Deploys PostToolUse hook (merged into settings.json) and implements ClaudeCodeProvider.processEvent()." \
+      --body "Deploys PostToolUse hook (merged into settings.json) and implements ClaudeCodeProvider.reconcileAgentState()." \
       --base main
     ```

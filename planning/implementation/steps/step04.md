@@ -8,7 +8,7 @@
 
 ---
 
-**Goal**: Deploy Copilot CLI hook config and implement `CopilotCliProvider.processEvent()` to parse hook events and track Copilot sessions in real time.
+**Goal**: Deploy Copilot CLI hook config and implement `CopilotCliProvider.reconcileAgentState()` to parse hook events and track Copilot sessions in real time.
 
 **Pre-check**: Step 3 PR is merged. `./gradlew run` shows watcher output.
 
@@ -62,9 +62,9 @@
   }
   ```
 
-- [ ] **4.2 Implement CopilotCliProvider.processEvent()**
+- [ ] **4.2 Implement CopilotCliProvider.reconcileAgentState()**
     - Replace the Step 2 stub with full event-driven state management
-    - Handle: `sessionStart`, `sessionEnd`, `postToolUse`, `userPromptSubmitted`
+    - Handle: `SessionStart`, `SessionEnd`, `PostToolUse`, `UserPromptSubmitted`
     - Unknown event types are handled gracefully (increment eventCount, update lastActivity)
 
   ```kotlin
@@ -73,47 +73,47 @@
   class CopilotCliProvider : AgentProvider {
       override val agentType = AgentType.CopilotCli
 
-      override fun processEvent(event: HookEvent, currentState: AgentState?): AgentState {
+      override fun reconcileAgentState(event: HookEvent, currentState: AgentState?): AgentState {
           val p = event.payload as CopilotPayload
           val sessionId = resolveSessionId(event.pid)
           return when (event.eventType) {
-              "sessionStart" -> AgentState(
+              HookEventType.SessionStart -> AgentState(
                   id = "${agentType.name}_${sessionId ?: event.pid}",
                   name = "Copilot CLI — ${sessionId?.take(8) ?: "PID ${event.pid}"}",
                   agentType = agentType,
                   status = AgentStatus.Running,
                   pid = event.pid,
                   sessionId = sessionId,
-                  cwd = p.cwd,
+                  cwd = p.cwd?.let { Path.of(it) },
                   eventCount = 1,
-                  lastActivity = event.timestamp * 1000,
+                  lastActivity = event.timestamp,
               )
-              "sessionEnd" -> currentState?.copy(
+              HookEventType.SessionEnd -> currentState?.copy(
                   status = AgentStatus.Stopped,
                   eventCount = currentState.eventCount + 1,
-                  lastActivity = event.timestamp * 1000,
+                  lastActivity = event.timestamp,
               ) ?: fallbackState(event)
-              "postToolUse" -> {
+              HookEventType.PostToolUse -> {
                   val toolName = p.toolName
                   currentState?.copy(
                       eventCount = currentState.eventCount + 1,
-                      lastActivity = event.timestamp * 1000,
+                      lastActivity = event.timestamp,
                       extra = currentState.extra + buildMap {
                           toolName?.let { put("lastTool", it) }
                           put("toolCalls", ((currentState.extra["toolCalls"]?.toIntOrNull() ?: 0) + 1).toString())
                       },
                   ) ?: fallbackState(event)
               }
-              "userPromptSubmitted" -> currentState?.copy(
+              HookEventType.UserPromptSubmitted -> currentState?.copy(
                   eventCount = currentState.eventCount + 1,
-                  lastActivity = event.timestamp * 1000,
+                  lastActivity = event.timestamp,
                   extra = currentState.extra + mapOf(
                       "prompts" to ((currentState.extra["prompts"]?.toIntOrNull() ?: 0) + 1).toString()
                   ),
               ) ?: fallbackState(event)
               else -> currentState?.copy(
                   eventCount = currentState.eventCount + 1,
-                  lastActivity = event.timestamp * 1000,
+                  lastActivity = event.timestamp,
               ) ?: fallbackState(event)
           }
       }
@@ -128,7 +128,7 @@
               pid = event.pid,
               sessionId = sessionId,
               eventCount = 1,
-              lastActivity = event.timestamp * 1000,
+              lastActivity = event.timestamp,
           )
       }
   }
@@ -163,13 +163,13 @@
   git add -A && git commit -m "feat: Copilot CLI hook provider with session tracking
 
   - Deploy hook config to ~/.copilot/hooks/agent-pulse.json
-  - CopilotCliProvider.processEvent() handles sessionStart/End, postToolUse, userPromptSubmitted
+  - CopilotCliProvider.reconcileAgentState() handles SessionStart/End, PostToolUse, UserPromptSubmitted
   - Session ID resolution via inuse.<PID>.lock file scan
   - HookDeployer.deployCopilotCliHooks() for hook config management
 
   Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
   git push -u origin step-4-copilot-provider
   gh pr create --title "Step 4: Copilot CLI hook provider" \
-    --body "Hook config deployment, CopilotCliProvider.processEvent() with session tracking, PID→session resolution." \
+    --body "Hook config deployment, CopilotCliProvider.reconcileAgentState() with session tracking, PID→session resolution." \
     --base main
   ```

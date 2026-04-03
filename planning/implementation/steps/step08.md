@@ -8,11 +8,11 @@
 
 ---
 
-**Goal**: Deploy Codex notify config and Gemini hook config, implement `CodexProvider` and `GeminiProvider` `processEvent()`.
+**Goal**: Deploy Codex notify config and Gemini hook config, implement `CodexProvider` and `GeminiProvider` `reconcileAgentState()`.
 
 **Pre-check**: Step 7 PR is merged. `git checkout main && git pull`. `./gradlew build` passes.
 
-**App state AFTER this step**: Codex CLI fires its `notify` command which invokes `report.sh`, and events flow through `CodexProvider.processEvent()` into `AgentStateManager`. Gemini CLI fires `AfterTool` hook events which flow through `GeminiProvider.processEvent()`. Both agents appear in the dashboard when active.
+**App state AFTER this step**: Codex CLI fires its `notify` command which invokes `report.sh`, and events flow through `CodexProvider.reconcileAgentState()` into `AgentStateManager`. Gemini CLI fires `AfterTool` hook events which flow through `GeminiProvider.reconcileAgentState()`. Both agents appear in the dashboard when active.
 
 ---
 
@@ -23,20 +23,20 @@
   notify = ["$HOME/.agent-pulse/hooks/report.sh notify codex-cli"]
   ```
 
-- [ ] **8.2 Implement CodexProvider.processEvent()**
+- [ ] **8.2 Implement CodexProvider.reconcileAgentState()**
   Replace the stub in `src/main/kotlin/com/agentpulse/provider/CodexProvider.kt`:
   ```kotlin
   class CodexProvider : AgentProvider {
       override val agentType = AgentType.CodexCli
 
-      override fun processEvent(event: HookEvent, currentState: AgentState?): AgentState {
+      override fun reconcileAgentState(event: HookEvent, currentState: AgentState?): AgentState {
           val p = event.payload as CodexPayload
           val threadId = p.threadId   // @SerialName("thread_id")
           val sessionId = threadId ?: event.pid.toString()
 
           return currentState?.copy(
               eventCount = currentState.eventCount + 1,
-              lastActivity = event.timestamp * 1000,
+              lastActivity = event.timestamp,
               extra = currentState.extra + buildMap {
                   put("turns", ((currentState.extra["turns"]?.toIntOrNull() ?: 0) + 1).toString())
               },
@@ -48,7 +48,7 @@
               pid = event.pid,
               sessionId = threadId,
               eventCount = 1,
-              lastActivity = event.timestamp * 1000,
+              lastActivity = event.timestamp,
           )
       }
   }
@@ -67,17 +67,17 @@
   }
   ```
 
-- [ ] **8.4 Implement GeminiProvider.processEvent()**
+- [ ] **8.4 Implement GeminiProvider.reconcileAgentState()**
   Replace the stub in `src/main/kotlin/com/agentpulse/provider/GeminiProvider.kt`:
   ```kotlin
   class GeminiProvider : AgentProvider {
       override val agentType = AgentType.GeminiCli
 
-      override fun processEvent(event: HookEvent, currentState: AgentState?): AgentState {
+      override fun reconcileAgentState(event: HookEvent, currentState: AgentState?): AgentState {
           val p = event.payload as GeminiPayload
           return currentState?.copy(
               eventCount = currentState.eventCount + 1,
-              lastActivity = event.timestamp * 1000,
+              lastActivity = event.timestamp,
               extra = currentState.extra + buildMap {
                   p.toolName?.let { put("lastTool", it) }
                   put("toolCalls", ((currentState.extra["toolCalls"]?.toIntOrNull() ?: 0) + 1).toString())
@@ -88,9 +88,9 @@
               agentType = agentType,
               status = AgentStatus.Running,
               pid = event.pid,
-              cwd = p.cwd,
+              cwd = p.cwd?.let { Path.of(it) },
               eventCount = 1,
-              lastActivity = event.timestamp * 1000,
+              lastActivity = event.timestamp,
               extra = buildMap { p.toolName?.let { put("lastTool", it) } },
           )
       }
@@ -112,13 +112,13 @@
   git add -A && git commit -m "feat: Codex + Gemini hook providers
 
   - Deploy Codex notify config via HookDeployer
-  - CodexProvider.processEvent() — parses thread-id, tracks turns
+  - CodexProvider.reconcileAgentState() — parses thread-id, tracks turns
   - Deploy Gemini hook config (AfterTool) via HookDeployer
-  - GeminiProvider.processEvent() — tracks events by PID
+  - GeminiProvider.reconcileAgentState() — tracks events by PID
 
   Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
   git push -u origin step-8-codex-gemini
   gh pr create --title "Step 8: Codex + Gemini hook providers" \
-    --body "Deploy hook configs for Codex (notify) and Gemini (AfterTool), implement processEvent() for both providers." \
+    --body "Deploy hook configs for Codex (notify) and Gemini (AfterTool), implement reconcileAgentState() for both providers." \
     --base main
   ```

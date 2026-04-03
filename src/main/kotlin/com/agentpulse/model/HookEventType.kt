@@ -3,38 +3,37 @@ package com.agentpulse.model
 /**
  * All documented hook event types across all supported agents.
  *
- * Each entry carries the known raw string values used by the various agent CLIs/IDEs so
- * that the watcher boundary can map them via [fromRaw] to a typed constant.
- *
- * Casing varies by agent (e.g. Copilot uses `sessionStart`, Claude uses `SessionStart`);
- * [fromRaw] performs a case-insensitive lookup and falls back to [Unknown].
+ * Each entry stores one canonical raw string (the documented event name). Matching in
+ * [fromRaw] is always case-insensitive, so agents that vary only in capitalisation
+ * (e.g. Copilot `sessionStart` vs Claude `SessionStart`) resolve to the same constant
+ * without needing duplicate entries.
  */
-enum class HookEventType(vararg val rawValues: String) {
+enum class HookEventType(val rawValue: String) {
 
     // ── Lifecycle — shared across Copilot CLI, Claude Code, Gemini CLI, Cursor ───────────
-    /** Session begins. Raw: `sessionStart` (Copilot/Cursor), `SessionStart` (Claude/Gemini). */
-    SessionStart("sessionStart", "SessionStart"),
+    /** Session begins. Agents: Copilot/Cursor (`sessionStart`), Claude/Gemini (`SessionStart`). */
+    SessionStart("sessionStart"),
 
-    /** Session ends. Raw: `sessionEnd` (Copilot/Cursor), `SessionEnd` (Claude/Gemini). */
-    SessionEnd("sessionEnd", "SessionEnd"),
+    /** Session ends. Agents: Copilot/Cursor (`sessionEnd`), Claude/Gemini (`SessionEnd`). */
+    SessionEnd("sessionEnd"),
 
     // ── Tool execution — Copilot CLI, Claude Code, Cursor ────────────────────────────────
-    /** Before tool invocation. Raw: `preToolUse` (Copilot/Cursor), `PreToolUse` (Claude). */
-    PreToolUse("preToolUse", "PreToolUse"),
+    /** Before tool invocation. Agents: Copilot/Cursor (`preToolUse`), Claude (`PreToolUse`). */
+    PreToolUse("preToolUse"),
 
-    /** After tool invocation. Raw: `postToolUse` (Copilot/Cursor), `PostToolUse` (Claude). */
-    PostToolUse("postToolUse", "PostToolUse"),
+    /** After tool invocation. Agents: Copilot/Cursor (`postToolUse`), Claude (`PostToolUse`). */
+    PostToolUse("postToolUse"),
 
     // ── Agent completion — Copilot CLI, Claude Code, Cursor ──────────────────────────────
-    /** Agent response/turn is complete. Raw: `stop` (Cursor), `Stop` (Claude). */
-    Stop("stop", "Stop"),
+    /** Agent response/turn is complete. Agents: Cursor (`stop`), Claude (`Stop`). */
+    Stop("stop"),
 
-    /** Subagent completed. Raw: `subagentStop` (Copilot), `SubagentStop` (Claude). */
-    SubagentStop("subagentStop", "SubagentStop"),
+    /** Subagent completed. Agents: Copilot (`subagentStop`), Claude (`SubagentStop`). */
+    SubagentStop("subagentStop"),
 
     // ── Context management — Claude Code, Cursor ────────────────────────────────────────
-    /** Before context compaction. Raw: `preCompact` (Cursor), `PreCompact` (Claude). */
-    PreCompact("preCompact", "PreCompact"),
+    /** Before context compaction. Agents: Cursor (`preCompact`), Claude (`PreCompact`). */
+    PreCompact("preCompact"),
 
     // ── Copilot CLI specific ──────────────────────────────────────────────────────────────
     /** User submitted a prompt. Raw: `userPromptSubmitted`. */
@@ -47,7 +46,7 @@ enum class HookEventType(vararg val rawValues: String) {
     ErrorOccurred("errorOccurred"),
 
     // ── Claude Code specific ─────────────────────────────────────────────────────────────
-    /** User submitted a prompt (Claude naming). Raw: `UserPromptSubmit`. */
+    /** User submitted a prompt (Claude naming — distinct from Copilot's UserPromptSubmitted). Raw: `UserPromptSubmit`. */
     UserPromptSubmit("UserPromptSubmit"),
 
     /** User notification triggered. Raw: `Notification`. */
@@ -97,19 +96,18 @@ enum class HookEventType(vararg val rawValues: String) {
 
     // ── Fallback ─────────────────────────────────────────────────────────────────────────
     /** Unrecognised event type received at runtime. */
-    Unknown;
+    Unknown("unknown");
 
     companion object {
         private val index: Map<String, HookEventType> =
             entries
                 .filter { it != Unknown }
-                .flatMap { type -> type.rawValues.map { raw -> raw.lowercase() to type } }
-                .toMap()
+                .associate { type -> type.rawValue.lowercase() to type }
 
         /**
          * Resolve a raw event-type string (from the hook filename or payload) to a
-         * [HookEventType]. Matching is case-insensitive. Returns [Unknown] for
-         * unrecognised values.
+         * [HookEventType]. Matching is case-insensitive via [String.lowercase]. Returns
+         * [Unknown] for unrecognised values.
          */
         fun fromRaw(raw: String): HookEventType = index[raw.lowercase()] ?: Unknown
     }

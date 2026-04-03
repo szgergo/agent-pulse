@@ -355,53 +355,52 @@ Branch naming: `step-1-scaffold`, `step-2-data-model`, `step-3-detection`, `step
 
 ## Architecture
 
+**MVP: Hooks + FileWatch only.** No process scanning, no agent file reading.
+
 ```
 ┌─ System Tray ───────────────────────────────────────────────────────┐
 │  🫀 agent-pulse                        [Ctrl+Shift+` to toggle]    │
 │                                                                     │
 │  ┌─ Compose Desktop Window ──────────────────────────────────────┐  │
 │  │                                                                │  │
-│  │  🟢 Copilot CLI — claude-opus-4.6 — agent-pulse (plan mode)   │  │
-│  │     PID 3251 · session a1b2c3d4 · 12m · ██░░ 42k tokens      │  │
-│  │     └─ 🟡 fleet worker (PID 3280) — implementing auth        │  │
+│  │  🟢 Copilot CLI — session a1b2c3d4 — /Users/me/myproject     │  │
+│  │     PID 3251 · 3 tool calls · 1 prompt                       │  │
 │  │                                                                │  │
-│  │  🟢 Claude Code — sonnet · ~/Projects/webapp                  │  │
-│  │     PID 9921 · $0.45 · 3 tools · 45m active                  │  │
+│  │  🟢 Claude Code — session e5f6g7h8 — ~/Projects/webapp       │  │
+│  │     PID 9921 · 7 tool calls · 2 prompts                      │  │
 │  │                                                                │  │
-│  │  🟢 Cursor — chat · "Welcome to Cursor"                      │  │
-│  │     1120 lines added · 3 files · 11.5% context                │  │
-│  │                                                                │  │
-│  │  🟢 Codex CLI — ~/Projects/api                                │  │
-│  │     PID 4001 · rollout-202604.jsonl active                    │  │
+│  │  🟢 Cursor — session conv_abc123 — ~/Projects/frontend       │  │
+│  │     PID 4501 · 2 file edits                                   │  │
 │  │                                                                │  │
 │  └────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─ Kotlin Backend (single process) ─────────────────────────────────────┐
 │                                                                       │
-│  ┌─ DetectionOrchestrator ──────────────────────────────────────────┐ │
+│  ┌─ HookEventWatcher ───────────────────────────────────────────────┐ │
 │  │                                                                   │ │
-│  │  FileWatcher (JBR WatchService)    ProcessScanner (OSHI)         │ │
-│  │  ├─ ~/.copilot/session-state/      Every 5s: scan for agent PIDs │ │
-│  │  ├─ ~/.claude/                     Walk process trees            │ │
-│  │  ├─ ~/.codex/sessions/             Match known signatures        │ │
-│  │  ├─ ~/.gemini/tmp/                                               │ │
-│  │  └─ (dynamic: project .cursor/)                                  │ │
+│  │  FileWatcher (JBR WatchService / native FSEvents)                │ │
+│  │  └─ ~/.agent-pulse/events/                                       │ │
+│  │     Watches for: ENTRY_CREATE                                    │ │
+│  │     On new file:                                                  │ │
+│  │       1. Parse filename → agent, event, PID, timestamp            │ │
+│  │       2. Read file → raw event JSON                               │ │
+│  │       3. Resolve session ID (per-agent logic in Kotlin)           │ │
+│  │       4. Update StateFlow<List<Agent>>                            │ │
+│  │       5. Delete processed file                                    │ │
 │  │                                                                   │ │
-│  │  On FS event OR timer → full scan → diff → update StateFlow     │ │
+│  │  On startup: scan events/ dir for queued files (recovery)        │ │
+│  │  Periodic: validate active PIDs (kill -0), cleanup stale files   │ │
 │  └───────────────────────────────────────────────────────────────────┘ │
 │                                                                       │
-│  ┌─ Provider Registry ──────────────────────────────────────────────┐ │
-│  │  CopilotCliProvider  — lock files + events.jsonl + session.db   │ │
-│  │  ClaudeCodeProvider  — process + MEMORY.md + OTel (if enabled)  │ │
-│  │  CursorProvider      — state.vscdb + ai-tracking.db + JSONL     │ │
-│  │  CodexProvider       — rollout JSONL + config.toml              │ │
-│  │  GeminiProvider      — chat files + settings.json               │ │
-│  └───────────────────────────────────────────────────────────────────┘ │
-│                                                                       │
-│  ┌─ OTLP Receiver (Ktor on localhost:4318) ─────────────────────────┐ │
-│  │  POST /v1/metrics → parse Claude Code metrics                    │ │
-│  │  POST /v1/logs    → parse Claude Code events + Cursor hooks      │ │
+│  ┌─ Hook Deployer ──────────────────────────────────────────────────┐ │
+│  │  First-run setup: detect installed agents, deploy hook configs    │ │
+│  │  Creates: ~/.agent-pulse/hooks/report.sh (3-line POSIX sh)       │ │
+│  │  Copilot CLI: ~/.copilot/hooks/agent-pulse.json                  │ │
+│  │  Claude Code: merge into ~/.claude/settings.json                 │ │
+│  │  Cursor: ~/.cursor/hooks.json                                    │ │
+│  │  Gemini: merge into settings.json                                │ │
+│  │  Codex: set notify command                                       │ │
 │  └───────────────────────────────────────────────────────────────────┘ │
 │                                                                       │
 │  ┌─ Search Indexer ─────────────────────────────────────────────────┐ │
@@ -411,7 +410,16 @@ Branch naming: `step-1-scaffold`, `step-2-data-model`, `step-3-detection`, `step
 │  StateFlow<List<Agent>> → Compose UI reactively updates              │
 │                                                                       │
 └───────────────────────────────────────────────────────────────────────┘
+
+Hook flow:
+  Agent starts → hook fires → report.sh writes file → FileWatch detects
+  → parse filename+content → resolve session ID → update dashboard
 ```
+
+**Post-MVP additions** (deferred):
+- Enrichment layer: read agent files for token counts, model, cost
+- OTLP receiver: embedded OTel endpoint for Claude Code/Cursor metrics
+- Process scanning: OSHI-based fallback for agents without hooks
 
 ---
 
@@ -419,15 +427,17 @@ Branch naming: `step-1-scaffold`, `step-2-data-model`, `step-3-detection`, `step
 
 Sourced from `agent-research.md` (comprehensive agent monitoring & extensibility research).
 
-| Agent | Detection Method | Primary Data Source | Data Richness | MVP? |
+**MVP: Hook-based monitoring only.** File-based enrichment deferred to post-MVP.
+
+| Agent | Hook Events | Event Data | Session ID Source | MVP? |
 |---|---|---|---|---|
-| **Copilot CLI** | Lock files + process | events.jsonl, workspace.yaml, session.db | **Excellent** | ✅ Step 4 |
-| **Copilot VS Code** | Same as CLI + vscode.metadata.json | Same as CLI + VS Code metadata | **Excellent** | ✅ Step 4 |
-| **Copilot IntelliJ** | Process only | OSHI process metrics | **Limited** | ✅ Step 4 |
-| **Claude Code CLI** | Process + files | MEMORY.md (basic) or OTel (excellent) | **Basic → Excellent** | ✅ Step 6 |
-| **Cursor IDE** | Process + SQLite | state.vscdb, ai-tracking.db, transcripts | **Very Good** | ✅ Step 7 |
-| **Codex CLI** | Process + files | rollout JSONL, config.toml | **Good** | ✅ Step 8 |
-| **Gemini CLI** | Process + files | chat files, settings.json | **Good** | ✅ Step 8 |
+| **Copilot CLI** | 8 (sessionStart, postToolUse, etc.) | Tool calls, prompts, errors, cwd | Lock file → PID lookup | ✅ Step 4 |
+| **Claude Code** | 9 (SessionStart, PostToolUse, etc.) | Tool calls, prompts, errors | Hook payload or session-health | ✅ Step 6 |
+| **Cursor** | 11+ (sessionStart, afterFileEdit, etc.) | conversation_id, tool use, edits | `conversation_id` in payload | ✅ Step 7 |
+| **Gemini CLI** | 6 (SessionStart, AfterTool, etc.) | Tool calls, prompts | Best-effort cwd+timing | ✅ Step 8 |
+| **Codex CLI** | 1 (notify per turn) | thread-id, messages, cwd | `thread-id` in payload | ✅ Step 8 |
+
+**Post-MVP enrichment** (deferred): events.jsonl token counts, SQLite session data, OTel metrics, MEMORY.md, workspace.yaml.
 
 ---
 
@@ -536,6 +546,8 @@ Each step is a separate branch + PR. Within each step, sub-tasks are sequential.
 ---
 
 ### Step 2: data-model — Core data model + provider system
+
+> ⚠️ **NEEDS REVISION**: This step was designed for process scanning + file reading. For hooks+FileWatch MVP, remove OSHI, SQLite, YAML deps. Replace `ProcessInfo` with `HookEvent`. Replace `AgentProvider.scan(processes)` with `AgentProvider.handleEvent(event)`. Remove `ReadOnlyDb`, `SafeFileReader`, `CachedFileState`. Add `HookEvent` data class parsed from filename+content.
 
 **Goal**: All Kotlin data classes, interfaces, and utilities defined. Stub providers for all agent types. App compiles and runs.
 
@@ -978,9 +990,11 @@ Each step is a separate branch + PR. Within each step, sub-tasks are sequential.
 
 ---
 
-### Step 3: detection — Process scanner + file watcher
+### Step 3: detection — Hook event watcher
 
-**Goal**: Background detection engine that discovers agent processes via OSHI and watches FS changes via JBR's WatchService, flowing results into a `StateFlow<List<Agent>>`.
+> ⚠️ **NEEDS REVISION**: This step was designed around OSHI process scanning + FileWatcher on agent dirs. For hooks+FileWatch MVP, replace entirely: single FileWatcher on `~/.agent-pulse/events/`, parse filename for metadata, read file for raw event JSON. No OSHI, no ProcessScanner, no process tree walking. Add HookDeployer for first-run hook installation.
+
+**Goal**: Background detection engine that watches `~/.agent-pulse/events/` for hook event files, flowing results into a `StateFlow<List<Agent>>`.
 
 **Pre-check**: Step 2 PR is merged. `./gradlew build` passes.
 
@@ -1168,9 +1182,11 @@ Each step is a separate branch + PR. Within each step, sub-tasks are sequential.
 
 ---
 
-### Step 4: copilot — Full Copilot CLI provider
+### Step 4: copilot — Copilot CLI hook provider
 
-**Goal**: Detect all running Copilot CLI instances via lock files and session data. Also detect Copilot in VS Code and IntelliJ via process signatures.
+> ⚠️ **NEEDS REVISION**: This step was designed around lock files + events.jsonl + session.db. For hooks+FileWatch MVP, replace with: Copilot CLI hook config deployment, sessionStart/postToolUse/sessionEnd event parsing, session ID resolution via PID→lock file lookup (in Kotlin). No events.jsonl reading, no workspace.yaml parsing, no session.db SQLite access.
+
+**Goal**: Deploy Copilot CLI hook config, parse hook events, resolve session IDs, display Copilot CLI sessions on dashboard.
 
 **Pre-check**: Step 3 PR is merged. `./gradlew run` shows scanner output.
 
@@ -1706,9 +1722,11 @@ Each step is a separate branch + PR. Within each step, sub-tasks are sequential.
 
 ---
 
-### Step 6: claude — Claude Code provider (Tier 1: file-based)
+### Step 6: claude — Claude Code hook provider
 
-**Goal**: Detect running Claude Code sessions via process scanning and file-based metadata.
+> ⚠️ **NEEDS REVISION**: Replace process scanning + file reading with hook-based monitoring. Deploy Claude Code hooks (merge into ~/.claude/settings.json). Parse PostToolUse/SessionStart events. Session ID from hook payload or session-health lookup.
+
+**Goal**: Deploy Claude Code hook config, parse hook events, display Claude Code sessions on dashboard.
 
 **Pre-check**: Step 5 PR is merged.
 
@@ -1806,9 +1824,11 @@ Each step is a separate branch + PR. Within each step, sub-tasks are sequential.
 
 ---
 
-### Step 7: cursor — Cursor provider (SQLite databases)
+### Step 7: cursor — Cursor hook provider
 
-**Goal**: Detect Cursor sessions via process scanning and read rich metadata from Cursor's SQLite databases and JSONL transcripts.
+> ⚠️ **NEEDS REVISION**: Replace process scanning + SQLite reading with hook-based monitoring. Deploy Cursor hooks (.cursor/hooks.json). Parse sessionStart/afterFileEdit/postToolUse events. Session ID from `conversation_id` in payload. No SQLite access.
+
+**Goal**: Deploy Cursor hook config, parse hook events, display Cursor sessions on dashboard.
 
 **Pre-check**: Step 6 PR is merged.
 
@@ -1948,9 +1968,11 @@ Each step is a separate branch + PR. Within each step, sub-tasks are sequential.
 
 ---
 
-### Step 8: codex-gemini — Codex + Gemini providers
+### Step 8: codex-gemini — Codex + Gemini hook providers
 
-**Goal**: Detect Codex CLI and Gemini CLI sessions.
+> ⚠️ **NEEDS REVISION**: Replace process scanning + file reading with hook-based monitoring. Codex: set `notify` command. Gemini: deploy hooks via settings.json merge. Parse respective event payloads.
+
+**Goal**: Deploy Codex notify config and Gemini hook config, parse events, display sessions on dashboard.
 
 **Pre-check**: Step 7 PR is merged.
 
@@ -2076,7 +2098,9 @@ Each step is a separate branch + PR. Within each step, sub-tasks are sequential.
 
 ---
 
-### Step 9: otlp — Embedded OTLP receiver
+### Step 9: otlp — Embedded OTLP receiver [POST-MVP]
+
+> ℹ️ **DEFERRED TO POST-MVP**: OTLP receiver adds enrichment (token counts, cost) but is not needed for the hooks+FileWatch MVP. Keep in plan for future.
 
 **Goal**: A lightweight HTTP/JSON OTLP endpoint on localhost that receives Claude Code telemetry and Cursor hook data.
 
@@ -2424,29 +2448,28 @@ Each step is a separate branch + PR. Within each step, sub-tasks are sequential.
 
 ## MVP Scope
 
-**v0.1 (Steps 1-5)** — Core functional dashboard:
-- System tray app with popup panel and global hotkey
-- Copilot CLI full monitoring (richest data source)
-- Copilot VS Code and IntelliJ detection
-- Pluggable provider system with stubs
+**v0.1 (Steps 1-5)** — Core functional dashboard (hooks + FileWatch):
+- System tray app with popup panel
+- Hook deployment for detected agents (Copilot CLI first)
+- FileWatch on `~/.agent-pulse/events/` for real-time event detection
+- Hook event parsing and session tracking
+- Dashboard UI showing active agent sessions
 
-**v0.2 (Steps 6-8)** — Multi-agent:
-- Claude Code file-based monitoring
-- Cursor SQLite database monitoring
-- Codex and Gemini monitoring
+**v0.2 (Steps 6-8)** — Multi-agent hooks:
+- Claude Code hook deployment and event parsing
+- Cursor hook deployment and event parsing
+- Codex and Gemini hook deployment and event parsing
 
-**v0.3 (Step 9)** — Rich telemetry:
-- Embedded OTLP receiver
-- Claude Code OTel integration (excellent metrics)
-- Foundation for Cursor hooks OTel
-
-**v1.0 (Steps 10-11)** — Release-ready:
+**v0.3 (Steps 9-10)** — Polish + release:
 - .dmg build, CI, README
+- Global hotkey (Ctrl+Shift+Backtick)
 - macOS Spotlight integration
 
-**Out of scope (future):**
+**Post-MVP (future enhancements):**
+- Enrichment layer: read agent files for token counts, model, cost
+- Embedded OTLP receiver for Claude Code/Cursor metrics
+- Process scanning (OSHI) as fallback for agents without hooks
 - Remote agent monitoring (agent-pulse HTTP API)
-- Agent control actions (kill, restart) — violates read-only principle
 - Windows/Linux builds
 - Historical session browser
 - Notification system (alert on finish/error)
@@ -2460,24 +2483,25 @@ This plan is informed by extensive research documented in companion files:
 | Document | Content | Lines |
 |---|---|---|
 | `research-alternative.md` | Tech stack decision: why JBR over Tauri/Rust/FFM | 258 |
-| `agent-research.md` | Agent detection, hooks, OTel, per-agent analysis, three-layer architecture | 1,695 |
+| `agent-research.md` | Agent hooks, safety analysis, delivery architecture, per-agent analysis, three-layer architecture | ~1,800 |
 
 Key research findings that shaped this plan:
-1. **macOS file watching**: OpenJDK polls every 2-10s; JBR uses native FSEvents (~100ms). This drove the Kotlin/JBR choice over OpenJDK.
-2. **Copilot CLI events.jsonl**: Contains 2,517+ events per session with full token metrics, tool calls, model changes. Richest single file source.
-3. **Claude Code OTel**: Official first-class support with 8 metrics + 5 event types. Transforms monitoring from "Basic" to "Excellent."
-4. **Cursor SQLite**: `state.vscdb` + `ai-code-tracking.db` contain session metadata, AI vs human line attribution per commit, conversation summaries. Much richer than initially assessed.
-5. **Read-only safety**: Critical principle added to prevent any possibility of agent corruption.
-6. **SQLite concurrent access**: Locks are tied to transactions (not connections). With `autoCommit=true` and open/close per query, our reads never hold locks between polls. `mode=ro` (not `immutable=1`) ensures change detection. Layered timeouts (JDBC 5s + coroutine 10s) make WAL checkpoint starvation impossible. `PRAGMA data_version` identified as future optimization if polling performance becomes a concern.
+1. **Hooks are a stable API** — agents publish and maintain hook schemas. File system paths are internal implementation details with no API contract.
+2. **Hook safety analysis** — hooks are synchronous/blocking in Copilot CLI, Claude Code, and Gemini. Our hook script must execute in <50ms. Disk-only design (no network) achieves ~30ms.
+3. **Delivery mechanism comparison** — disk files + FileWatch is the only approach that is durable (survives restarts), has zero dependencies, and poses zero risk to agents. Named pipes block, stdout corrupts, HTTP adds latency.
+4. **JBR FileWatch** — standard OpenJDK uses polling (2-10s) on macOS; JBR uses native FSEvents (~100-500ms). This drove the Kotlin/JBR choice.
+5. **Read-only principle** — agent-pulse never writes to agent directories. Only writes to its own `~/.agent-pulse/` directory.
 
 ---
 
 ## Notes
 
-- Copilot CLI's `inuse.<PID>.lock` is the primary discovery mechanism — confirmed on this machine with 18+ sessions
-- Cursor's `state.vscdb` is a standard SQLite database readable with `?mode=ro`
-- Claude Code's OTel requires `CLAUDE_CODE_ENABLE_TELEMETRY=1` — opt-in by the user
-- Global hotkey uses JNA + Carbon `RegisterEventHotKey` (same as JetBrains Toolbox) — no Accessibility permission needed unlike JNativeHook
+- Hook script is 3 lines of POSIX sh with zero external dependencies
+- Filename encodes metadata: `<timestamp>-<agent>-<event>-<ppid>.json`
+- Session ID resolution happens in Kotlin, not in the hook script
+- On first run, user must restart agent sessions after hook deployment
+- Global hotkey uses JNA + Carbon `RegisterEventHotKey` (same as JetBrains Toolbox) — no Accessibility permission needed
+- Post-MVP enrichment: Copilot CLI events.jsonl (2,517+ events/session), Claude Code OTel, Cursor SQLite, etc.
 - Compose Desktop's `Tray` composable handles system tray natively
 - JBR is bundled automatically by the Compose Gradle plugin — zero configuration
 - The `LSUIElement` plist key makes the app a background app (no dock icon)

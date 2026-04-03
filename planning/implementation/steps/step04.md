@@ -1,4 +1,15 @@
-# Step 4: copilot — Full Copilot CLI provider
+# Step 4: copilot — Copilot CLI hook provider
+
+> **⚠️ NEEDS REVISION FOR HOOKS+FILEWATCH MVP**
+> This step was designed around lock files + events.jsonl + session.db. Key changes:
+> - Replace lock file discovery with hook event parsing
+> - Deploy Copilot CLI hook config: `~/.copilot/hooks/agent-pulse.json`
+> - Parse sessionStart/sessionEnd/postToolUse/userPromptSubmitted events
+> - Session ID resolution: PID → find `inuse.<PID>.lock` → parent dir = session UUID
+> - Remove events.jsonl parsing — deferred to post-MVP enrichment
+> - Remove workspace.yaml parsing — deferred
+> - Remove session.db SQLite access — deferred
+> - Remove VS Code / IntelliJ detection — deferred (no hooks for those)
 
 > **⚠️ READ `shared-context.md` FIRST** — it contains all design principles, architecture,
 > SQLite safety rules, connection hygiene, tech stack, and project structure that apply to this step.

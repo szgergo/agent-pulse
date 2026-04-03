@@ -1,4 +1,15 @@
-# Step 3: detection — Process scanner + file watcher
+# Step 3: detection — Hook event watcher
+
+> **⚠️ NEEDS REVISION FOR HOOKS+FILEWATCH MVP**
+> This step was designed around OSHI process scanning + FileWatcher on agent dirs. Key changes:
+> - Remove `ProcessScanner.kt` (OSHI) — deferred to post-MVP
+> - Replace with `HookEventWatcher.kt`: single FileWatcher on `~/.agent-pulse/events/`
+> - Parse filename for metadata (agent, event, PID, timestamp)
+> - Read file content for raw event JSON
+> - Add `HookDeployer.kt`: first-run hook config deployment
+> - Add periodic PID validation (`kill -0`) for liveness checks
+> - Add startup scan of events/ dir for recovery after restart
+> - `DetectionOrchestrator` simplified: no process scanning, just FileWatch + PID checks
 
 > **⚠️ READ `shared-context.md` FIRST** — it contains all design principles, architecture,
 > SQLite safety rules, connection hygiene, tech stack, and project structure that apply to this step.

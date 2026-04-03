@@ -1,4 +1,13 @@
-# Step 6: claude — Claude Code provider (Tier 1: file-based)
+# Step 6: claude — Claude Code hook provider
+
+> **⚠️ NEEDS REVISION FOR HOOKS+FILEWATCH MVP**
+> Replace process scanning + file reading with hook-based monitoring:
+> - Deploy Claude Code hooks: merge into `~/.claude/settings.json` (use jq in installer)
+> - Use PostToolUse hooks only (not PreToolUse — avoid interfering with tool authorization)
+> - Parse SessionStart/PostToolUse events
+> - Session ID from payload or session-health directory lookup
+> - Remove MEMORY.md reading — deferred to post-MVP
+> - Remove OTel integration — deferred to post-MVP
 
 > **⚠️ READ `shared-context.md` FIRST** — it contains all design principles, architecture,
 > SQLite safety rules, connection hygiene, tech stack, and project structure that apply to this step.

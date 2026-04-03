@@ -1608,6 +1608,115 @@ All agents call one shared script — see [PPID + Session ID Correlation](#ppid-
 
 ---
 
+## Hook Safety Analysis & Delivery Architecture (Decision Record)
+
+### Context
+
+Before committing to hooks as the primary monitoring mechanism, we conducted a thorough safety analysis to ensure hook scripts cannot interfere with, slow down, or crash the AI agents they monitor.
+
+### Hook Execution Model — All 5 Agents
+
+| Agent | Execution | Blocking? | Timeout | On hook error |
+|---|---|---|---|---|
+| **Copilot CLI** | Subprocess | ✅ Synchronous | 5s (`timeoutSec`) | Logs error, continues |
+| **Claude Code** | Subprocess | ✅ Synchronous | ~2-5s (undocumented) | Returns `{}`, continues |
+| **Gemini CLI** | Subprocess | ✅ Synchronous | Unknown (may be infinite) | Unknown |
+| **Cursor** | Subprocess | ❌ Async (timeout-controlled) | 30-60s | May be killed |
+| **Codex** | Notify command | ❌ Fire-and-forget | N/A | Ignored |
+
+**Key finding:** For Copilot CLI, Claude Code, and Gemini — the agent is **blocked** while the hook runs. Any network call (curl, socat) in the hook adds latency to every tool call and prompt. This is the primary risk.
+
+### Risk Matrix
+
+| Risk | Severity | Impact | Root Cause |
+|---|---|---|---|
+| Agent blocking (network in hook) | 🔴 CRITICAL | 1-2s lag per hook event | curl/socat timeout |
+| FD leaks (curl connections) | 🔴 HIGH | Agent crashes with "too many open files" | Unclosed network FDs |
+| Race conditions (concurrent writes) | 🟠 HIGH | Data corruption/loss | Multiple hooks same timestamp |
+| Missing dependencies (jq/curl) | 🟠 HIGH | Silent event loss | Not installed on all systems |
+| Config merge clobber | 🟠 MODERATE | User loses existing hooks | Overwrite instead of merge |
+| Non-zero exit | 🟢 LOW | Agent logs error, continues | All agents handle gracefully |
+
+### Delivery Mechanism Comparison
+
+| Mechanism | Latency | If agent-pulse down | Risk to agent | Dependencies |
+|---|---|---|---|---|
+| **Disk files + FileWatch** ✅ | 100-500ms | ✅ Events persist on disk | ✅ **None** | **None** |
+| Unix domain socket | <1ms | ⚠️ ECONNREFUSED, event lost | ✅ Fails fast | `socat` or `nc` |
+| HTTP localhost (curl) | 50-150ms | ⚠️ ECONNREFUSED, event lost | 🟡 curl dep + FD leaks | `curl` |
+| Named pipe (FIFO) | <1ms | 🔴 **BLOCKS → agent freezes** | 🔴 CRITICAL | None |
+| Hook stdout | <1ms | N/A | 🔴 **Corrupts hook return values** | None |
+
+#### Why stdout is impossible
+All agents parse hook stdout for protocol responses (`permissionDecision`, `additionalContext`). Writing monitoring data to stdout corrupts the agent's hook communication channel.
+
+#### Why named pipes are dangerous
+- `PIPE_BUF` = 512 bytes on macOS; hook events are 800B-2KB → concurrent writers **interleave** at buffer boundary → corrupted JSON
+- Writing to a FIFO with no reader **blocks indefinitely** → the agent hangs waiting for the hook to finish
+
+#### Why HTTP/socket approaches add unnecessary risk
+Any network-based approach needs a disk fallback for when agent-pulse is down. The disk path is inherently durable — events persist across restarts. Adding a network layer means two code paths, more dependencies, and more failure modes for zero functional benefit in a monitoring dashboard where 100-500ms latency is perfectly acceptable.
+
+### Architecture Decision: Disk-Only Hooks + JBR FileWatch
+
+**Chosen approach:** Hook scripts write raw event JSON to disk files. agent-pulse watches the directory using JBR's native FSEvents (WatchService).
+
+#### The Hook Script
+
+```sh
+#!/bin/sh
+mkdir -p "$HOME/.agent-pulse/events"
+T=$(mktemp "$HOME/.agent-pulse/events/.tmp.XXXXXX")
+cat > "$T"
+mv "$T" "$HOME/.agent-pulse/events/$(date +%s)-$2-$1-$PPID.json"
+```
+
+Properties:
+- **Zero external dependencies** — uses only POSIX sh builtins (`cat`, `mktemp`, `mv`, `mkdir`)
+- **~30ms execution time** — just a file write, well within any agent's timeout
+- **Zero network involvement** — no FD leaks, no blocking on connection
+- **Zero stdout output** — doesn't interfere with agent's hook protocol
+- **Atomic writes** — `mktemp` + `mv` prevents partial reads and race conditions
+- **Filename encodes metadata** — `<timestamp>-<agent>-<event>-<agentPid>.json`
+- **File content is raw event JSON** — dumped as-is from agent, parsed by agent-pulse in Kotlin
+
+#### JBR FileWatch Performance
+
+- Standard OpenJDK `WatchService` on macOS: **polling, 2-10s latency** (unacceptable)
+- JBR (bundled with Compose Desktop): **native FSEvents via JNI, 100-500ms latency**
+- JBR's `MacOSXWatchService` uses Apple's FSEvents API — zero-cost idle, kernel-push notifications
+- Our `build.gradle.kts` already specifies `JvmVendorSpec.JETBRAINS` — automatic, no extra config
+
+#### Remaining Risks (All Manageable)
+
+| Risk | Severity | Mitigation |
+|---|---|---|
+| PPID indirection (wrong PID via intermediate shell) | 🟠 Moderate | Process tree walk in Kotlin |
+| Config merge clobber (overwriting user's hooks) | 🟠 Moderate | jq merge + backup in installer |
+| File accumulation (agent-pulse never runs) | 🟠 Moderate | Cap check or cleanup sweep |
+| Agent hook schema changes | 🟠 Moderate | Version pinning in installer |
+| Disk full | 🟡 Low | Graceful degradation, agent unaffected |
+| Timestamp collision | 🟡 Low | $PPID + $$ in filename ensures uniqueness |
+
+#### v2 Enhancement: Unix Domain Socket Overlay
+
+Deferred. When implemented:
+- agent-pulse creates `~/.agent-pulse/agent-pulse.sock`
+- Hook script: try socket first (instant), fall back to disk (durable)
+- Adds `socat` dependency but provides sub-millisecond delivery
+
+### MVP Scope Decision
+
+**Hooks + FileWatch only.** No process scanning, no lock file watching, no agent file reading.
+
+Rationale:
+- Hooks are a **stable API** — agents publish and maintain hook schemas
+- File system paths (lock files, events.jsonl, SQLite) are **internal implementation details** with no API contract
+- On first run: deploy hooks, tell user to restart their sessions
+- Enrichment layer (token counts, model, cost from agent files) deferred to post-MVP
+
+---
+
 ## Product Positioning
 
 ### What agent-pulse IS

@@ -1,4 +1,13 @@
-# Step 7: cursor — Cursor provider (SQLite databases)
+# Step 7: cursor — Cursor hook provider
+
+> **⚠️ NEEDS REVISION FOR HOOKS+FILEWATCH MVP**
+> Replace process scanning + SQLite reading with hook-based monitoring:
+> - Deploy Cursor hooks: `~/.cursor/hooks.json` (v1.7+ first-class hooks)
+> - Parse sessionStart/afterFileEdit/postToolUse/beforeShellExecution events
+> - Session ID from `conversation_id` in payload
+> - Remove state.vscdb SQLite reading — deferred to post-MVP
+> - Remove ai-code-tracking.db reading — deferred
+> - Remove JSONL transcript reading — deferred
 
 > **⚠️ READ `shared-context.md` FIRST** — it contains all design principles, architecture,
 > SQLite safety rules, connection hygiene, tech stack, and project structure that apply to this step.

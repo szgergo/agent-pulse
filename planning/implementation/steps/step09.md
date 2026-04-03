@@ -1,4 +1,6 @@
-# Step 9: otlp — Embedded OTLP receiver
+# Step 9: otlp — Embedded OTLP receiver [POST-MVP]
+
+> **ℹ️ DEFERRED TO POST-MVP** — OTLP receiver provides enrichment (token counts, cost) but is not required for the hooks+FileWatch MVP. Keep for future implementation.
 
 > **⚠️ READ `shared-context.md` FIRST** — it contains all design principles, architecture,
 > SQLite safety rules, connection hygiene, tech stack, and project structure that apply to this step.

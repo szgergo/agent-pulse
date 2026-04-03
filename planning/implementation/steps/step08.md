@@ -1,4 +1,11 @@
-# Step 8: codex-gemini — Codex + Gemini providers
+# Step 8: codex-gemini — Codex + Gemini hook providers
+
+> **⚠️ NEEDS REVISION FOR HOOKS+FILEWATCH MVP**
+> Replace process scanning + file reading with hook-based monitoring:
+> - Codex: set `notify` command in config to invoke report.sh. Parse thread-id from payload.
+> - Gemini: deploy hooks via settings.json merge. Parse SessionStart/AfterTool events.
+> - Remove rollout JSONL reading — deferred
+> - Remove Gemini chat file reading — deferred
 
 > **⚠️ READ `shared-context.md` FIRST** — it contains all design principles, architecture,
 > SQLite safety rules, connection hygiene, tech stack, and project structure that apply to this step.

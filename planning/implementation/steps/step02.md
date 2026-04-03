@@ -1,5 +1,16 @@
 # Step 2: data-model — Core data model + provider system
 
+> **⚠️ NEEDS REVISION FOR HOOKS+FILEWATCH MVP**
+> This step was designed for process scanning + file reading. Key changes needed:
+> - Remove OSHI dependency (`com.github.oshi:oshi-core`)
+> - Remove SQLite dependency (`org.xerial:sqlite-jdbc`) — deferred to post-MVP
+> - Remove YAML dependency (`com.charleskorn.kaml:kaml`) — deferred to post-MVP
+> - Replace `ProcessInfo` data class with `HookEvent` (parsed from filename + file content)
+> - Replace `AgentProvider.scan(processes: List<ProcessInfo>)` with `AgentProvider.handleEvent(event: HookEvent)`
+> - Remove `ReadOnlyDb`, `SafeFileReader`, `CachedFileState` utilities — deferred to post-MVP
+> - Add `HookEvent` data class: agent, eventType, pid, timestamp, rawJson
+> - Keep: `Agent`, `AgentType`, `AgentStatus`, `ProviderRegistry`, `SearchIndexer`
+
 > **⚠️ READ `shared-context.md` FIRST** — it contains all design principles, architecture,
 > SQLite safety rules, connection hygiene, tech stack, and project structure that apply to this step.
 > Path: `planning/implementation/shared-context.md`

@@ -1,6 +1,7 @@
 .gradle/
 build/
 ibin/
+bin/
 .idea/
 *.iml
 .DS_Store

@@ -97,20 +97,20 @@ enum class HookEventType(vararg val rawValues: String) {
 
     // ── Fallback ─────────────────────────────────────────────────────────────────────────
     /** Unrecognised event type received at runtime. */
-    Unknown("unknown");
+    Unknown;
 
     companion object {
         private val index: Map<String, HookEventType> =
-            entries.flatMap { type -> type.rawValues.map { raw -> raw to type } }.toMap()
+            entries
+                .filter { it != Unknown }
+                .flatMap { type -> type.rawValues.map { raw -> raw.lowercase() to type } }
+                .toMap()
 
         /**
          * Resolve a raw event-type string (from the hook filename or payload) to a
          * [HookEventType]. Matching is case-insensitive. Returns [Unknown] for
          * unrecognised values.
          */
-        fun fromRaw(raw: String): HookEventType =
-            index[raw] ?: entries.firstOrNull { type ->
-                type.rawValues.any { it.equals(raw, ignoreCase = true) }
-            } ?: Unknown
+        fun fromRaw(raw: String): HookEventType = index[raw.lowercase()] ?: Unknown
     }
 }

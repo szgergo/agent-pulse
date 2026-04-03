@@ -1,6 +1,7 @@
 package com.agentpulse.provider
 
 import com.agentpulse.model.AgentState
+import com.agentpulse.model.AgentStatus
 import com.agentpulse.model.AgentType
 import com.agentpulse.model.HookEvent
 
@@ -24,4 +25,21 @@ interface AgentProvider {
      * @return Updated [AgentState] reflecting the new event.
      */
     fun processEvent(event: HookEvent, currentState: AgentState?): AgentState
+
+    /** Default ID for a new session: "{typeName}_{pid}". */
+    fun defaultId(event: HookEvent): String = "${agentType.name}_${event.pid}"
+
+    /** Default display name for a new session. */
+    fun defaultName(event: HookEvent): String = "${agentType.displayName} — PID ${event.pid}"
+
+    /** Create a minimal initial [AgentState] for a new session. */
+    fun initialState(event: HookEvent): AgentState = AgentState(
+        id = defaultId(event),
+        name = defaultName(event),
+        agentType = agentType,
+        status = AgentStatus.Running,
+        pid = event.pid,
+        eventCount = 1,
+        lastActivity = event.timestamp * 1000,
+    )
 }

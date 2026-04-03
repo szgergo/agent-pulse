@@ -5,6 +5,7 @@ plugins {
     id("org.jetbrains.compose") version "1.7.1"
     id("org.jetbrains.kotlin.plugin.compose") version "2.0.21"
     id("org.sonarqube") version "7.2.3.7755"
+    kotlin("plugin.serialization") version "2.0.21"
 }
 
 group = "com.agentpulse"
@@ -26,6 +27,13 @@ dependencies {
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
     implementation(compose.components.resources)
+
+    // JSON parsing (hook event payloads)
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+
+    // Coroutines (background FileWatch, state flow)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.9.0")
 }
 
 compose.desktop {

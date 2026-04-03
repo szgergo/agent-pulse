@@ -11,7 +11,10 @@ group = "com.agentpulse"
 version = "0.1.0"
 
 kotlin {
-    jvmToolchain(17)
+    jvmToolchain {
+        languageVersion.set(JavaLanguageVersion.of(21))
+        vendor.set(JvmVendorSpec.JETBRAINS)
+    }
 }
 
 repositories {
@@ -22,6 +25,7 @@ repositories {
 dependencies {
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
+    implementation(compose.components.resources)
 }
 
 compose.desktop {
@@ -49,8 +53,8 @@ compose.desktop {
 
 sonar {
     properties {
-        property("sonar.projectKey", "szgergo_agent-pulse")
-        property("sonar.organization", "szgergo-1")
+        property("sonar.projectKey", "agent-pulse")
+        property("sonar.organization", "AgentPulse")
     }
 }
 

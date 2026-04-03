@@ -489,7 +489,8 @@ agent-pulse/
 │   │   │   ├── AgentState.kt
 │   │   │   ├── AgentType.kt
 │   │   │   ├── AgentStatus.kt
-│   │   │   └── HookEvent.kt
+│   │   │   ├── HookEvent.kt
+│   │   │   └── HookEventType.kt
 │   │   ├── provider/
 │   │   │   ├── AgentProvider.kt
 │   │   │   ├── AgentStateManager.kt

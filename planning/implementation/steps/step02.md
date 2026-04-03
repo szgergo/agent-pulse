@@ -108,7 +108,64 @@
   ) : HookPayload
   ```
 
-- [ ] **2.5 Create src/main/kotlin/com/agentpulse/model/HookEvent.kt**
+- [ ] **2.5 Create src/main/kotlin/com/agentpulse/model/HookEventType.kt**
+  Typed enum of all documented hook event types across all supported agents.
+  Use `fromRaw(String)` to map the raw filename token to a typed constant; falls back
+  to `Unknown` for unrecognised values.
+  ```kotlin
+  package com.agentpulse.model
+
+  enum class HookEventType(vararg val rawValues: String) {
+      // Lifecycle — shared across Copilot CLI, Claude Code, Gemini CLI, Cursor
+      SessionStart("sessionStart", "SessionStart"),
+      SessionEnd("sessionEnd", "SessionEnd"),
+      // Tool execution — Copilot CLI, Claude Code, Cursor
+      PreToolUse("preToolUse", "PreToolUse"),
+      PostToolUse("postToolUse", "PostToolUse"),
+      // Agent completion — Copilot CLI, Claude Code, Cursor
+      Stop("stop", "Stop"),
+      SubagentStop("subagentStop", "SubagentStop"),
+      // Context management — Claude Code, Cursor
+      PreCompact("preCompact", "PreCompact"),
+      // Copilot CLI specific
+      UserPromptSubmitted("userPromptSubmitted"),
+      AgentStop("agentStop"),
+      ErrorOccurred("errorOccurred"),
+      // Claude Code specific
+      UserPromptSubmit("UserPromptSubmit"),
+      Notification("Notification"),
+      // Gemini CLI specific
+      BeforeTool("BeforeTool"),
+      AfterTool("AfterTool"),
+      BeforeAgent("BeforeAgent"),
+      AfterAgent("AfterAgent"),
+      BeforeModel("BeforeModel"),
+      AfterModel("AfterModel"),
+      // Cursor specific
+      BeforeShellExecution("beforeShellExecution"),
+      AfterShellExecution("afterShellExecution"),
+      AfterFileEdit("afterFileEdit"),
+      BeforeSubmitPrompt("beforeSubmitPrompt"),
+      BeforeMcpExecution("beforeMCPExecution"),
+      AfterMcpExecution("afterMCPExecution"),
+      // Codex CLI specific
+      Notify("notify"),
+      // Fallback
+      Unknown("unknown");
+
+      companion object {
+          private val index: Map<String, HookEventType> =
+              entries.flatMap { type -> type.rawValues.map { raw -> raw to type } }.toMap()
+
+          fun fromRaw(raw: String): HookEventType =
+              index[raw] ?: entries.firstOrNull { type ->
+                  type.rawValues.any { it.equals(raw, ignoreCase = true) }
+              } ?: Unknown
+      }
+  }
+  ```
+
+- [ ] **2.6 Create src/main/kotlin/com/agentpulse/model/HookEvent.kt**
   Parsed from hook event filename + typed payload. The filename encodes metadata:
   `<timestamp>-<agent>-<eventType>-<pid>.json`
   ```kotlin
@@ -116,17 +173,19 @@
 
   data class HookEvent(
       val agent: AgentType,
-      val eventType: String,       // "sessionStart", "postToolUse", "sessionEnd", etc.
-      val pid: Int,                // Agent PID (from $PPID in hook script)
-      val timestamp: Long,         // Epoch seconds (from filename)
-      val payload: HookPayload,    // Typed payload — parsed at watcher boundary
+      val eventType: HookEventType,    // Typed event — resolved from hook filename or payload
+      val pid: Int,                    // Agent PID (from $PPID in hook script)
+      val timestamp: Long,             // Epoch seconds (from filename)
+      val payload: HookPayload,        // Typed payload — parsed at watcher boundary
   )
   ```
 
-- [ ] **2.6 Create src/main/kotlin/com/agentpulse/model/AgentState.kt**
+- [ ] **2.7 Create src/main/kotlin/com/agentpulse/model/AgentState.kt**
   Snapshot of an agent's current state, projected from hook events by the provider.
   ```kotlin
   package com.agentpulse.model
+
+  import java.nio.file.Path
 
   data class AgentState(
       val id: String,                    // "{type}_{sessionId}" or "{type}_{pid}"
@@ -135,7 +194,7 @@
       val status: AgentStatus,
       val pid: Int,
       val sessionId: String? = null,     // Agent-specific session identifier
-      val cwd: String? = null,           // Working directory (if available from hook payload)
+      val cwd: Path? = null,             // Working directory (if available from hook payload)
       val model: String? = null,         // Post-MVP enrichment
       val eventCount: Int = 0,           // Number of hook events received for this session
       val lastActivity: Long? = null,    // Epoch millis of most recent hook event
@@ -145,7 +204,7 @@
   )
   ```
 
-- [ ] **2.7 Create src/main/kotlin/com/agentpulse/provider/AgentProvider.kt**
+- [ ] **2.8 Create src/main/kotlin/com/agentpulse/provider/AgentProvider.kt**
   Pure event processor. Each implementation knows how to translate its agent's hook JSON
   into the universal `AgentState`. The provider is stateless — state is held by `AgentStateManager`.
   ```kotlin
@@ -178,7 +237,7 @@
   }
   ```
 
-- [ ] **2.8 Create src/main/kotlin/com/agentpulse/provider/AgentStateManager.kt**
+- [ ] **2.9 Create src/main/kotlin/com/agentpulse/provider/AgentStateManager.kt**
   Central state holder. Routes hook events to providers, maintains the reactive state
   that Compose UI observes. Replaces both `HookEventStore` and `ProviderRegistry`.
   ```kotlin
@@ -225,7 +284,7 @@
   }
   ```
 
-- [ ] **2.9 Create src/main/kotlin/com/agentpulse/search/SearchIndexer.kt**
+- [ ] **2.10 Create src/main/kotlin/com/agentpulse/search/SearchIndexer.kt**
   ```kotlin
   package com.agentpulse.search
 
@@ -238,7 +297,7 @@
   }
   ```
 
-- [ ] **2.10 Create src/main/kotlin/com/agentpulse/search/NoopIndexer.kt**
+- [ ] **2.11 Create src/main/kotlin/com/agentpulse/search/NoopIndexer.kt**
   ```kotlin
   package com.agentpulse.search
 
@@ -251,7 +310,7 @@
   }
   ```
 
-- [ ] **2.11 Create stub providers** — one file per agent type in `src/main/kotlin/com/agentpulse/provider/`
+- [ ] **2.12 Create stub providers** — one file per agent type in `src/main/kotlin/com/agentpulse/provider/`
   Each stub returns a minimal `AgentState` from `processEvent()`.
   Example for CopilotCliProvider:
   ```kotlin
@@ -284,13 +343,13 @@
     - `CodexProvider` — `AgentType.CodexCli`
     - `GeminiProvider` — `AgentType.GeminiCli`
 
-- [ ] **2.12 Verify compilation**
+- [ ] **2.13 Verify compilation**
   ```bash
   cd <project-root> && ./gradlew build
   ```
   Must compile with zero errors. Then `./gradlew run` — app should launch unchanged.
 
-- [ ] **2.13 Commit, push, and open PR**
+- [ ] **2.14 Commit, push, and open PR**
   ```bash
   git checkout -b step-2-data-model
   git add -A && git commit -m "feat: data model, provider system, and state manager

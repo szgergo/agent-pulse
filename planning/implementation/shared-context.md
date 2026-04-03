@@ -291,19 +291,23 @@ Implementation agents use **`claude-haiku-4.5`** — fast and cheap. The detaile
 | **Language** | Kotlin/JVM | Single language for entire app, strong typing, coroutines |
 | **UI Framework** | Compose for Desktop (Material 3) | Declarative UI, JetBrains-maintained, reactive state |
 | **Runtime** | JetBrains Runtime (JBR) 25 LTS | Native FSEvents WatchService on macOS (see `research-alternative.md`) |
-| **Process Scanning** | [OSHI](https://github.com/oshi/oshi) 6.6.x | Cross-platform process enumeration, no JNI |
 | **File Watching** | `java.nio.file.WatchService` (JBR) | Native FSEvents on macOS via JBR, ~100ms latency |
-| **SQLite** | [sqlite-jdbc](https://github.com/xerial/sqlite-jdbc) 3.46.x | Read-only access to agent databases (Copilot, Cursor) |
 | **JSON** | kotlinx-serialization-json | Kotlin-native, fast, compile-time safe |
-| **YAML** | [kaml](https://github.com/charleskorn/kaml) | Parse Copilot's `workspace.yaml` |
-| **Coroutines** | kotlinx-coroutines | Background scanning, debouncing, state flow |
+| **Coroutines** | kotlinx-coroutines | Background FileWatch, debouncing, state flow |
 | **Global Hotkey** | [JNA](https://github.com/java-native-access/jna) 5.x + Carbon (macOS) | Same approach as JetBrains Toolbox — native `RegisterEventHotKey` via JNA |
 | **Shortcut Conflicts** | [JBR API](https://jetbrains.github.io/JetBrainsRuntimeApi/) `SystemShortcuts` | Query existing OS shortcuts to avoid conflicts (JBR-specific) |
 | **System Tray** | Compose `Tray` composable | Built-in tray support in Compose Desktop |
-| **OTLP Receiver** | [Ktor](https://ktor.io/) HTTP server | Lightweight HTTP/JSON endpoint for OTel data |
 | **Spotlight Bridge** | Swift CLI (bundled) | Core Spotlight integration on macOS |
 | **Packaging** | Compose Gradle plugin (jpackage + jlink) | Bundles JBR automatically, produces `.dmg` |
 | **Desktop Extras** | [JBR API](https://jetbrains.github.io/JetBrainsRuntimeApi/) | Custom title bars, rounded corners, HiDPI |
+
+**Post-MVP additions** (deferred):
+| Layer | Technology | Why |
+|---|---|---|
+| **Process Scanning** | [OSHI](https://github.com/oshi/oshi) 6.6.x | Cross-platform process enumeration (enrichment layer) |
+| **SQLite** | [sqlite-jdbc](https://github.com/xerial/sqlite-jdbc) 3.46.x | Read-only access to agent databases (enrichment) |
+| **YAML** | [kaml](https://github.com/charleskorn/kaml) | Parse Copilot's `workspace.yaml` (enrichment) |
+| **OTLP Receiver** | [Ktor](https://ktor.io/) HTTP server | Lightweight HTTP/JSON endpoint for OTel data |
 
 **Why not Tauri/Rust?** See `research-alternative.md` — the critical issue is macOS file watching. OpenJDK polls every 2-10 seconds; JBR uses native FSEvents. Since Compose Desktop bundles JBR automatically, the fix is zero-config.
 
@@ -470,24 +474,25 @@ agent-pulse/
 │   │   ├── Main.kt
 │   │   ├── GlobalHotKey.kt              (Step 11)
 │   │   ├── model/
-│   │   │   ├── Agent.kt
+│   │   │   ├── AgentState.kt
 │   │   │   ├── AgentType.kt
 │   │   │   ├── AgentStatus.kt
-│   │   │   └── ProcessInfo.kt
+│   │   │   └── HookEvent.kt
 │   │   ├── provider/
 │   │   │   ├── AgentProvider.kt
+│   │   │   ├── HookEventStore.kt
 │   │   │   ├── ProviderRegistry.kt
 │   │   │   ├── CopilotCliProvider.kt       (Step 4)
 │   │   │   ├── ClaudeCodeProvider.kt       (Step 6)
 │   │   │   ├── CursorProvider.kt           (Step 7)
 │   │   │   ├── CodexProvider.kt            (Step 8)
 │   │   │   └── GeminiProvider.kt           (Step 8)
-│   │   ├── detection/
-│   │   │   ├── ProcessScanner.kt
-│   │   │   ├── FileWatcher.kt
-│   │   │   └── DetectionOrchestrator.kt
+│   │   ├── watcher/
+│   │   │   └── HookEventWatcher.kt         (Step 3)
+│   │   ├── deploy/
+│   │   │   └── HookDeployer.kt             (Step 3)
 │   │   ├── otlp/
-│   │   │   └── OtlpReceiver.kt            (Step 9)
+│   │   │   └── OtlpReceiver.kt            (Step 9, POST-MVP)
 │   │   ├── ui/
 │   │   │   ├── App.kt
 │   │   │   ├── Dashboard.kt
@@ -498,10 +503,7 @@ agent-pulse/
 │   │   │   ├── SearchIndexer.kt
 │   │   │   ├── SpotlightIndexer.kt         (Step 11)
 │   │   │   └── NoopIndexer.kt
-│   │   └── util/
-│   │       ├── ReadOnlyDb.kt
-│   │       ├── SafeFileReader.kt
-│   │       └── CachedFileState.kt
+│   │   └── util/                            (reserved for post-MVP utilities)
 │   ├── composeResources/
 │   │   └── drawable/
 │   │       └── tray_icon.png

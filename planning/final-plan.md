@@ -6,7 +6,7 @@ When running multiple AI coding agents (Copilot CLI, Claude Code, Codex, Cursor,
 
 **agent-pulse** is a lightweight system tray app (like JetBrains Toolbox) that gives you a live dashboard of every AI agent running on your machine — and optionally remote ones too.
 
-> **Note**: The tech stack is **Kotlin/Compose Desktop + JetBrains Runtime (JBR)**, as decided in `research-alternative.md`. Agent detection strategies are documented in `agent-monitoring-research.md`.
+> **Note**: The tech stack is **Kotlin/Compose Desktop + JetBrains Runtime (JBR)**, as decided in `research-alternative.md`. Agent detection strategies are documented in `agent-research.md`.
 
 ---
 
@@ -417,7 +417,7 @@ Branch naming: `step-1-scaffold`, `step-2-data-model`, `step-3-detection`, `step
 
 ## Agent Support Matrix
 
-Sourced from `agent-monitoring-research.md` (1,235 lines of verified research).
+Sourced from `agent-research.md` (comprehensive agent monitoring & extensibility research).
 
 | Agent | Detection Method | Primary Data Source | Data Richness | MVP? |
 |---|---|---|---|---|
@@ -1176,7 +1176,7 @@ Each step is a separate branch + PR. Within each step, sub-tasks are sequential.
 
 **App state AFTER this step**: If Copilot CLI sessions are running, terminal shows `[agent-pulse] Scan: N agents found` where N > 0. The provider reads lock files, workspace.yaml, config.json, events.jsonl (all read-only).
 
-**Data sources** (all read-only, verified from live system — see `agent-monitoring-research.md`):
+**Data sources** (all read-only, verified from live system — see `agent-research.md`):
 
 | File | Format | Read Method | Key Data |
 |---|---|---|---|
@@ -2082,7 +2082,7 @@ Each step is a separate branch + PR. Within each step, sub-tasks are sequential.
 
 **Pre-check**: Step 8 PR is merged.
 
-**Why**: Without OTLP, Claude Code monitoring is "Basic" (process + MEMORY.md only). With it, Claude Code jumps to "Excellent" — tokens, cost, tool calls, session IDs, everything. See `agent-monitoring-research.md` §Architectural Implication.
+**Why**: Without OTLP, Claude Code monitoring is "Basic" (process + MEMORY.md only). With it, Claude Code jumps to "Excellent" — tokens, cost, tool calls, session IDs, everything. See `agent-research.md` §Architectural Implication.
 
 **App state AFTER**: Claude Code sessions (when OTel-configured) show full metrics in the dashboard. A setup wizard guides users through enabling telemetry.
 
@@ -2460,7 +2460,7 @@ This plan is informed by extensive research documented in companion files:
 | Document | Content | Lines |
 |---|---|---|
 | `research-alternative.md` | Tech stack decision: why JBR over Tauri/Rust/FFM | 258 |
-| `agent-monitoring-research.md` | Agent detection strategies, file formats, verified data sources | 1,235 |
+| `agent-research.md` | Agent detection, hooks, OTel, per-agent analysis, three-layer architecture | 1,695 |
 
 Key research findings that shaped this plan:
 1. **macOS file watching**: OpenJDK polls every 2-10s; JBR uses native FSEvents (~100ms). This drove the Kotlin/JBR choice over OpenJDK.

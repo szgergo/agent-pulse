@@ -10,7 +10,7 @@ When running multiple AI coding agents (Copilot CLI, Claude Code, Codex, Cursor,
 
 **agent-pulse** is a lightweight system tray app (like JetBrains Toolbox) that gives you a live dashboard of every AI agent running on your machine — and optionally remote ones too.
 
-> **Note**: The tech stack is **Kotlin/Compose Desktop + JetBrains Runtime (JBR)**, as decided in `research-alternative.md`. Agent detection strategies are documented in `agent-monitoring-research.md`.
+> **Note**: The tech stack is **Kotlin/Compose Desktop + JetBrains Runtime (JBR)**, as decided in `research-alternative.md`. Agent detection strategies are documented in `agent-research.md`.
 
 ---
 
@@ -451,7 +451,7 @@ Branch naming: `step-1-scaffold`, `step-2-data-model`, `step-3-detection`, `step
 
 ## Agent Support Matrix
 
-Sourced from `agent-monitoring-research.md` (1,235 lines of verified research).
+Sourced from `agent-research.md` (comprehensive agent monitoring & extensibility research).
 
 | Agent | Detection Method | Primary Data Source | Data Richness | MVP? |
 |---|---|---|---|---|
@@ -570,7 +570,7 @@ This plan is informed by extensive research documented in companion files:
 | Document | Content | Lines |
 |---|---|---|
 | `research-alternative.md` | Tech stack decision: why JBR over Tauri/Rust/FFM | 258 |
-| `agent-monitoring-research.md` | Agent detection strategies, file formats, verified data sources | 1,235 |
+| `agent-research.md` | Agent detection, hooks, OTel, per-agent analysis, three-layer architecture | 1,695 |
 
 Key research findings that shaped this plan:
 1. **macOS file watching**: OpenJDK polls every 2-10s; JBR uses native FSEvents (~100ms). This drove the Kotlin/JBR choice over OpenJDK.

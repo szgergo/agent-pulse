@@ -11,7 +11,7 @@
 
 **Pre-check**: Step 8 PR is merged.
 
-**Why**: Without OTLP, Claude Code monitoring is "Basic" (process + MEMORY.md only). With it, Claude Code jumps to "Excellent" — tokens, cost, tool calls, session IDs, everything. See `agent-monitoring-research.md` §Architectural Implication.
+**Why**: Without OTLP, Claude Code monitoring is "Basic" (process + MEMORY.md only). With it, Claude Code jumps to "Excellent" — tokens, cost, tool calls, session IDs, everything. See `agent-research.md` §Architectural Implication.
 
 **App state AFTER**: Claude Code sessions (when OTel-configured) show full metrics in the dashboard. A setup wizard guides users through enabling telemetry.
 

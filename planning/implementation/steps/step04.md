@@ -13,7 +13,7 @@
 
 **App state AFTER this step**: If Copilot CLI sessions are running, terminal shows `[agent-pulse] Scan: N agents found` where N > 0. The provider reads lock files, workspace.yaml, config.json, events.jsonl (all read-only).
 
-**Data sources** (all read-only, verified from live system — see `agent-monitoring-research.md`):
+**Data sources** (all read-only, verified from live system — see `agent-research.md`):
 
 | File | Format | Read Method | Key Data |
 |---|---|---|---|

@@ -53,8 +53,8 @@ compose.desktop {
 
 sonar {
     properties {
-        property("sonar.projectKey", "agent-pulse")
-        property("sonar.organization", "AgentPulse")
+        property("sonar.projectKey", "szgergo_agent-pulse")
+        property("sonar.organization", "agent-pulse")
     }
 }
 

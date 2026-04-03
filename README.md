@@ -16,8 +16,8 @@ Universal AI Agent Dashboard — a lightweight system tray app that monitors AI 
 Static analysis runs automatically on every push to `main` and on pull requests via `.github/workflows/sonarcloud.yml`.
 
 The `org.sonarqube` Gradle plugin is configured in `build.gradle.kts` with:
-- `sonar.projectKey = agent-pulse`
-- `sonar.organization = AgentPulse`
+- `sonar.projectKey = szgergo_agent-pulse`
+- `sonar.organization = agent-pulse`
 
 Analysis runs: `./gradlew build sonar --info`
 

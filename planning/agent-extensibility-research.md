@@ -218,9 +218,27 @@ notify = ["~/.agent-pulse/hooks/report.sh"]
 
 ---
 
-### Copilot CLI — Richest Passive Data ✅
+### Copilot CLI — Full Hooks + OTel Support ✅
 
-No hook configuration needed. Copilot CLI already writes the richest local file artifacts of all agents by default: lock files with PIDs for lifecycle, `events.jsonl` with full token metrics and tool calls, `workspace.yaml` with session metadata. agent-pulse simply reads these existing files — no deployment step required for this agent.
+**UPDATE (2026-04-03):** Copilot CLI supports the same hooks system as the other agents, plus OTel export. The "passive file reading only" assessment was wrong.
+
+**Hooks (8 event types):** `sessionStart`, `sessionEnd`, `userPromptSubmitted`, `preToolUse`, `postToolUse`, `agentStop`, `subagentStop`, `errorOccurred`
+
+**Config locations (hierarchical):**
+- Global: `~/.copilot/hooks/*.json` — applies to all sessions
+- Per-repo: `.github/hooks/*.json` — overrides global
+
+**Hook input JSON includes:** timestamp, cwd, source (new/resume), initialPrompt, toolName, toolArgs, toolResult, error details, session end reason (complete/error/abort/timeout/user_exit)
+
+**OTel export (verified in SDK types + runtime JS):**
+- `OTEL_EXPORTER_OTLP_ENDPOINT` — OTLP HTTP endpoint for traces/metrics
+- `COPILOT_OTEL_FILE_EXPORTER_PATH` — JSON-lines trace output to file
+- `COPILOT_OTEL_EXPORTER_TYPE` — "otlp-http" or "file"
+- `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` — capture prompts/responses
+
+**Also supports:** Full plugin system (plugin.json manifest, marketplaces), Node.js extensions (`~/.copilot/extensions/`), MCP servers.
+
+**Strategy:** Use hooks for lifecycle + tool events, OTel for token metrics. File reading (`events.jsonl`, lock files) becomes fallback/enrichment only.
 
 ---
 
@@ -228,7 +246,7 @@ No hook configuration needed. Copilot CLI already writes the richest local file 
 
 | Agent | Mechanism | Effort | Session Start | Session End | Per-Turn Data | Token Data |
 |---|---|---|---|---|---|---|
-| **Copilot CLI** | Passive file reading | None (data already on disk) | ✅ | ✅ | ✅ | ✅ |
+| **Copilot CLI** | Hooks (8 events) + OTel | ~2h deploy script | ✅ `sessionStart` | ✅ `sessionEnd` (with reason) | ✅ `pre/postToolUse` | ✅ Via OTel |
 | **Claude Code** | Hooks + OTLP | ~2h config | ✅ `SessionStart` | ✅ `SessionEnd` | ✅ `PostToolUse` | ✅ Via OTLP |
 | **Gemini** | Hooks + OTel | ~2h config | ✅ `SessionStart` | ✅ `SessionEnd` | ✅ `AfterTool` | ⚠️ Via OTel |
 | **Codex** | Notify hook + OTel | ~1h config | ⚠️ First turn | ⚠️ Inferred | ✅ Every turn | ⚠️ Via OTel |

@@ -31,6 +31,7 @@ dependencies {
 compose.desktop {
     application {
         mainClass = "com.agentpulse.MainKt"
+        jvmArgs("-Dapple.awt.UIElement=true")
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg)
@@ -41,6 +42,7 @@ compose.desktop {
                 bundleID = "com.agentpulse.app"
                 minimumSystemVersion = "12.0"
                 infoPlist {
+                    //noinspection SpellCheckingInspection
                     extraKeysRawXml = """
                         <key>LSUIElement</key>
                         <true/>

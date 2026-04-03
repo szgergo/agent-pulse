@@ -31,7 +31,9 @@ dependencies {
 compose.desktop {
     application {
         mainClass = "com.agentpulse.MainKt"
-        jvmArgs("-Dapple.awt.UIElement=true")
+        if (System.getProperty("os.name").contains("Mac", ignoreCase = true)) {
+            jvmArgs("-Dapple.awt.UIElement=true")
+        }
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg)

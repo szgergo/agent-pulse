@@ -6,5 +6,4 @@ bin/
 *.iml
 .DS_Store
 .kotlin/
-planning/
 settings.json

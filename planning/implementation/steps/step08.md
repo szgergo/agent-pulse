@@ -3,6 +3,8 @@
 > **⚠️ READ `shared-context.md` FIRST** — it contains all design principles, architecture,
 > and project structure that apply to this step.
 > Path: `planning/implementation/shared-context.md`
+>
+> 📚 **Further reading**: Codex notify config and Gemini hook schemas in [`research/agent-research.md`](../../research/agent-research.md)
 
 ---
 

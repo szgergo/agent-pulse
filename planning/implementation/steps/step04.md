@@ -3,6 +3,8 @@
 > **⚠️ READ `shared-context.md` FIRST** — it contains all design principles, architecture,
 > and project structure that apply to this step.
 > Path: `planning/implementation/shared-context.md`
+>
+> 📚 **Further reading**: Copilot CLI process signatures, session ID lookup, hook schemas, and events.jsonl structure in [`research/agent-research.md`](../../research/agent-research.md)
 
 ---
 

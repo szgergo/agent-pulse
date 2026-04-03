@@ -6,7 +6,7 @@ When running multiple AI coding agents (Copilot CLI, Claude Code, Codex, Cursor,
 
 **agent-pulse** is a lightweight system tray app (like JetBrains Toolbox) that gives you a live dashboard of every AI agent running on your machine — and optionally remote ones too.
 
-> **Note**: The tech stack is **Kotlin/Compose Desktop + JetBrains Runtime (JBR)**, as decided in `research-alternative.md`. Agent detection strategies are documented in `agent-research.md`.
+> **Note**: The tech stack is **Kotlin/Compose Desktop + JetBrains Runtime (JBR)**, as decided in `research/research-alternative.md`. Agent detection strategies are documented in `research/agent-research.md`.
 
 ---
 
@@ -284,7 +284,7 @@ Implementation agents use **`claude-haiku-4.5`** — fast and cheap. The detaile
 |---|---|---|
 | **Language** | Kotlin/JVM | Single language for entire app, strong typing, coroutines |
 | **UI Framework** | Compose for Desktop (Material 3) | Declarative UI, JetBrains-maintained, reactive state |
-| **Runtime** | JetBrains Runtime (JBR) 25 LTS | Native FSEvents WatchService on macOS (see `research-alternative.md`) |
+| **Runtime** | JetBrains Runtime (JBR) 25 LTS | Native FSEvents WatchService on macOS (see `research/research-alternative.md`) |
 | **Process Scanning** | [OSHI](https://github.com/oshi/oshi) 6.6.x | **POST-MVP.** Cross-platform process enumeration fallback for agents without hooks |
 | **File Watching** | `java.nio.file.WatchService` (JBR) | Native FSEvents on macOS via JBR, ~100ms latency |
 | **SQLite** | [sqlite-jdbc](https://github.com/xerial/sqlite-jdbc) 3.46.x | **POST-MVP.** Read-only access to agent databases for enrichment layer |
@@ -299,7 +299,7 @@ Implementation agents use **`claude-haiku-4.5`** — fast and cheap. The detaile
 | **Packaging** | Compose Gradle plugin (jpackage + jlink) | Bundles JBR automatically, produces `.dmg` |
 | **Desktop Extras** | [JBR API](https://jetbrains.github.io/JetBrainsRuntimeApi/) | Custom title bars, rounded corners, HiDPI |
 
-**Why not Tauri/Rust?** See `research-alternative.md` — the critical issue is macOS file watching. OpenJDK polls every 2-10 seconds; JBR uses native FSEvents. Since Compose Desktop bundles JBR automatically, the fix is zero-config.
+**Why not Tauri/Rust?** See `research/research-alternative.md` — the critical issue is macOS file watching. OpenJDK polls every 2-10 seconds; JBR uses native FSEvents. Since Compose Desktop bundles JBR automatically, the fix is zero-config.
 
 ---
 
@@ -429,7 +429,7 @@ Hook flow:
 
 ## Agent Support Matrix
 
-Sourced from `agent-research.md` (comprehensive agent monitoring & extensibility research).
+Sourced from `research/agent-research.md` (comprehensive agent monitoring & extensibility research).
 
 **MVP: Hook-based monitoring only.** File-based enrichment deferred to post-MVP.
 
@@ -736,8 +736,8 @@ This plan is informed by extensive research documented in companion files:
 
 | Document | Content | Lines |
 |---|---|---|
-| `research-alternative.md` | Tech stack decision: why JBR over Tauri/Rust/FFM | 258 |
-| `agent-research.md` | Agent hooks, safety analysis, delivery architecture, per-agent analysis, three-layer architecture | ~1,800 |
+| `research/research-alternative.md` | Tech stack decision: why JBR over Tauri/Rust/FFM | 258 |
+| `research/agent-research.md` | Agent hooks, safety analysis, delivery architecture, per-agent analysis, three-layer architecture | ~1,800 |
 
 Key research findings that shaped this plan:
 1. **Hooks are a stable API** — agents publish and maintain hook schemas. File system paths are internal implementation details with no API contract.

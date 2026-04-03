@@ -3,6 +3,8 @@
 > **⚠️ READ `shared-context.md` FIRST** — it contains all design principles, architecture,
 > and project structure that apply to this step.
 > Path: `planning/implementation/shared-context.md`
+>
+> 📚 **Further reading**: Claude Code OTel endpoint, hook schemas, and settings.json structure in [`research/agent-research.md`](../../research/agent-research.md)
 
 ---
 

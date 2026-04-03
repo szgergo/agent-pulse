@@ -28,8 +28,8 @@
       override val agentType = AgentType.CodexCli
 
       override fun processEvent(event: HookEvent, currentState: AgentState?): AgentState {
-          val threadId = event.rawJson["thread_id"]?.jsonPrimitive?.contentOrNull
-              ?: event.rawJson["thread-id"]?.jsonPrimitive?.contentOrNull
+          val p = event.payload as CodexPayload
+          val threadId = p.threadId   // @SerialName("thread_id")
           val sessionId = threadId ?: event.pid.toString()
 
           return currentState?.copy(
@@ -72,17 +72,24 @@
       override val agentType = AgentType.GeminiCli
 
       override fun processEvent(event: HookEvent, currentState: AgentState?): AgentState {
+          val p = event.payload as GeminiPayload
           return currentState?.copy(
               eventCount = currentState.eventCount + 1,
               lastActivity = event.timestamp * 1000,
+              extra = currentState.extra + buildMap {
+                  p.toolName?.let { put("lastTool", it) }
+                  put("toolCalls", ((currentState.extra["toolCalls"]?.toIntOrNull() ?: 0) + 1).toString())
+              },
           ) ?: AgentState(
               id = "${agentType.name}_${event.pid}",
               name = "Gemini CLI — PID ${event.pid}",
               agentType = agentType,
               status = AgentStatus.Running,
               pid = event.pid,
+              cwd = p.cwd,
               eventCount = 1,
               lastActivity = event.timestamp * 1000,
+              extra = buildMap { p.toolName?.let { put("lastTool", it) } },
           )
       }
   }

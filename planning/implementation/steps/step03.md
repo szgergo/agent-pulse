@@ -21,8 +21,8 @@
 Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   → HookEventWatcher detects ENTRY_CREATE via WatchService
   → Parses filename: <timestamp>-<agent>-<eventType>-<ppid>.json
-  → Reads file content as JsonObject
-  → Creates HookEvent(agent, eventType, pid, timestamp, rawJson)
+  → Reads file content and deserializes to typed HookPayload based on agent
+  → Creates HookEvent(agent, eventType, pid, timestamp, payload)
   → AgentStateManager.onEvent(event)
   → Routes to provider → updates StateFlow → UI reacts
 ```
@@ -37,8 +37,8 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   - Uses `java.nio.file.WatchService` (JBR = native FSEvents on macOS)
   - Watches `~/.agent-pulse/events/` for `ENTRY_CREATE`
   - On new file: parse filename `<timestamp>-<agent>-<eventType>-<ppid>.json`
-  - Read file content as `JsonObject` via `kotlinx.serialization.json.Json`
-  - Create `HookEvent(agent, eventType, pid, timestamp, rawJson)`
+  - Read file content and deserialize to typed `HookPayload` via `kotlinx.serialization.json.Json`
+  - Create `HookEvent(agent, eventType, pid, timestamp, payload)`
   - Call `AgentStateManager.onEvent(event)`
   - Delete processed file (cleanup)
   - Ignore files starting with `.tmp.` (still being written by `report.sh`'s atomic rename pattern)
@@ -54,10 +54,15 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
 
   import com.agentpulse.model.AgentType
   import com.agentpulse.model.HookEvent
+  import com.agentpulse.model.HookPayload
+  import com.agentpulse.model.CopilotPayload
+  import com.agentpulse.model.ClaudePayload
+  import com.agentpulse.model.CursorPayload
+  import com.agentpulse.model.CodexPayload
+  import com.agentpulse.model.GeminiPayload
   import com.agentpulse.provider.AgentStateManager
   import kotlinx.coroutines.*
   import kotlinx.serialization.json.Json
-  import kotlinx.serialization.json.JsonObject
   import java.nio.file.*
   import kotlin.io.path.*
 
@@ -66,7 +71,6 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
       private val eventsDir: Path = Path.of(System.getProperty("user.home"), ".agent-pulse", "events"),
   ) {
       private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-      private val json = Json { ignoreUnknownKeys = true }
 
       fun start() {
           Files.createDirectories(eventsDir)
@@ -118,14 +122,14 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
               val timestamp = timestampStr.toLongOrNull() ?: return
 
               val content = file.readText()
-              val rawJson = json.decodeFromString<JsonObject>(content)
+              val payload = parsePayload(agent, content)
 
               val hookEvent = HookEvent(
                   agent = agent,
                   eventType = eventType,
                   pid = pid,
                   timestamp = timestamp,
-                  rawJson = rawJson,
+                  payload = payload,
               )
 
               stateManager.onEvent(hookEvent)
@@ -152,7 +156,14 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
                                   eventType = "sessionEnd",
                                   pid = agent.pid,
                                   timestamp = System.currentTimeMillis() / 1000,
-                                  rawJson = JsonObject(emptyMap()),
+                                  payload = when (agent.agentType) {
+                                      AgentType.CopilotCli, AgentType.CopilotVsCode, AgentType.CopilotIntelliJ ->
+                                          CopilotPayload()
+                                      AgentType.ClaudeCode -> ClaudePayload()
+                                      AgentType.CursorIde -> CursorPayload()
+                                      AgentType.CodexCli -> CodexPayload()
+                                      AgentType.GeminiCli -> GeminiPayload()
+                                  },
                               )
                               stateManager.onEvent(syntheticEvent)
                               println("[agent-pulse] PID ${agent.pid} dead → synthetic sessionEnd")
@@ -169,6 +180,18 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
           "codex-cli" -> AgentType.CodexCli
           "gemini-cli" -> AgentType.GeminiCli
           else -> null
+      }
+
+      private fun parsePayload(agent: AgentType, content: String): HookPayload {
+          val json = Json { ignoreUnknownKeys = true }
+          return when (agent) {
+              AgentType.CopilotCli, AgentType.CopilotVsCode, AgentType.CopilotIntelliJ ->
+                  json.decodeFromString<CopilotPayload>(content)
+              AgentType.ClaudeCode -> json.decodeFromString<ClaudePayload>(content)
+              AgentType.CursorIde -> json.decodeFromString<CursorPayload>(content)
+              AgentType.CodexCli -> json.decodeFromString<CodexPayload>(content)
+              AgentType.GeminiCli -> json.decodeFromString<GeminiPayload>(content)
+          }
       }
 
       fun stop() {

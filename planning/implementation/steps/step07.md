@@ -53,7 +53,8 @@
       override val agentType = AgentType.CursorIde
 
       override fun processEvent(event: HookEvent, currentState: AgentState?): AgentState {
-          val conversationId = event.rawJson["conversation_id"]?.jsonPrimitive?.contentOrNull
+          val p = event.payload as CursorPayload
+          val conversationId = p.conversationId   // @SerialName("conversation_id")
           val sessionId = conversationId ?: event.pid.toString()
 
           return when (event.eventType) {
@@ -68,7 +69,7 @@
                   lastActivity = event.timestamp * 1000,
               )
               "afterFileEdit" -> {
-                  val filePath = event.rawJson["file_path"]?.jsonPrimitive?.contentOrNull
+                  val filePath = p.filePath          // @SerialName("file_path")
                   currentState?.copy(
                       eventCount = currentState.eventCount + 1,
                       lastActivity = event.timestamp * 1000,

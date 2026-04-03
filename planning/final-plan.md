@@ -461,6 +461,7 @@ agent-pulse/
 │   │   │   ├── AgentState.kt
 │   │   │   ├── AgentType.kt
 │   │   │   ├── AgentStatus.kt
+│   │   │   ├── HookPayload.kt
 │   │   │   └── HookEvent.kt
 │   │   ├── provider/
 │   │   │   ├── AgentProvider.kt
@@ -551,7 +552,8 @@ Each step is a separate branch + PR. Within each step, sub-tasks are sequential.
 
 **Key deliverables**:
 - `AgentState` data class — immutable snapshot of an agent session (id, name, agentType, status, pid, sessionId, cwd, model, eventCount, lastActivity, uptimeSecs, tokenUsage, extra)
-- `HookEvent` data class — parsed from hook event files (agent, eventType, pid, timestamp, rawJson)
+- `HookEvent` data class — parsed from hook event files (agent, eventType, pid, timestamp, payload: HookPayload)
+- `HookPayload` sealed interface — per-agent typed payload classes (CopilotPayload, ClaudePayload, CursorPayload, CodexPayload, GeminiPayload) with @Serializable + @SerialName annotations
 - `AgentType` enum, `AgentStatus` enum
 - `AgentProvider` interface — single method: `fun processEvent(event: HookEvent, currentState: AgentState?): AgentState`
 - `AgentStateManager` — routes events to providers, manages `StateFlow<List<AgentState>>`

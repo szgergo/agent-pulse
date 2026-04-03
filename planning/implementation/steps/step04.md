@@ -72,6 +72,7 @@
       override val agentType = AgentType.CopilotCli
 
       override fun processEvent(event: HookEvent, currentState: AgentState?): AgentState {
+          val p = event.payload as CopilotPayload
           val sessionId = resolveSessionId(event.pid)
           return when (event.eventType) {
               "sessionStart" -> AgentState(
@@ -81,7 +82,7 @@
                   status = AgentStatus.Running,
                   pid = event.pid,
                   sessionId = sessionId,
-                  cwd = event.rawJson["cwd"]?.jsonPrimitive?.contentOrNull,
+                  cwd = p.cwd,
                   eventCount = 1,
                   lastActivity = event.timestamp * 1000,
               )
@@ -91,7 +92,7 @@
                   lastActivity = event.timestamp * 1000,
               ) ?: fallbackState(event)
               "postToolUse" -> {
-                  val toolName = event.rawJson["toolName"]?.jsonPrimitive?.contentOrNull
+                  val toolName = p.toolName
                   currentState?.copy(
                       eventCount = currentState.eventCount + 1,
                       lastActivity = event.timestamp * 1000,

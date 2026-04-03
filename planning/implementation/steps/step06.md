@@ -51,14 +51,14 @@
     package com.agentpulse.provider
 
     import com.agentpulse.model.*
-    import kotlinx.serialization.json.contentOrNull
-    import kotlinx.serialization.json.jsonPrimitive
+    import com.agentpulse.model.ClaudePayload
 
     class ClaudeCodeProvider : AgentProvider {
         override val agentType = AgentType.ClaudeCode
 
         override fun processEvent(event: HookEvent, currentState: AgentState?): AgentState {
-            val toolName = event.rawJson["tool_name"]?.jsonPrimitive?.contentOrNull
+            val p = event.payload as ClaudePayload
+            val toolName = p.toolName   // @SerialName("tool_name") handles the mapping
 
             if (currentState == null) {
                 // First event for this PID = session start

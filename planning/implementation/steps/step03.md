@@ -72,7 +72,9 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   package com.agentpulse.watcher
 
   import com.agentpulse.model.AgentType
+  import com.agentpulse.model.AgentStatus
   import com.agentpulse.model.HookEvent
+  import com.agentpulse.model.HookEventType
   import com.agentpulse.model.HookPayload
   import com.agentpulse.model.CopilotPayload
   import com.agentpulse.model.ClaudePayload
@@ -83,6 +85,7 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   import kotlinx.coroutines.*
   import kotlinx.serialization.json.Json
   import java.nio.file.*
+  import java.time.Instant
   import kotlin.io.path.*
 
   class HookEventWatcher(
@@ -90,13 +93,17 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
       private val eventsDir: Path = Path.of(System.getProperty("user.home"), ".agent-pulse", "events"),
   ) {
       private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+      private val json = Json { ignoreUnknownKeys = true }
 
       private fun Path.isProcessableEvent(): Boolean =
           name.endsWith(".json") && !name.startsWith(".tmp.")
 
       fun start() {
           Files.createDirectories(eventsDir)
-          processExistingFiles()  // Recovery after restart
+          // processExistingFiles runs on the IO scope (SupervisorJob + Dispatchers.IO)
+          scope.launch {
+              processExistingFiles()  // Recovery after restart
+          }
           startWatching()
           startPidValidation()
           println("[agent-pulse] Watching: $eventsDir")
@@ -156,6 +163,7 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
       }
 
       private fun processFile(file: Path) {
+          // Called from IO scope (startWatching / processExistingFiles) — file reads are safe
           try {
               if (!file.exists()) return
               val parts = file.nameWithoutExtension.split("-", limit = 4)
@@ -198,9 +206,9 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
                               // Fire synthetic sessionEnd event
                               val syntheticEvent = HookEvent(
                                   agent = agent.agentType,
-                                  eventType = "sessionEnd",
+                                  eventType = HookEventType.SessionEnd,
                                   pid = agent.pid,
-                                  timestamp = System.currentTimeMillis() / 1000,
+                                  timestamp = Instant.now(),
                                   payload = when (agent.agentType) {
                                       AgentType.CopilotCli, AgentType.CopilotVsCode, AgentType.CopilotIntelliJ ->
                                           CopilotPayload()
@@ -228,7 +236,6 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
       }
 
       private fun parsePayload(agent: AgentType, content: String): HookPayload {
-          val json = Json { ignoreUnknownKeys = true }
           return when (agent) {
               AgentType.CopilotCli, AgentType.CopilotVsCode, AgentType.CopilotIntelliJ ->
                   json.decodeFromString<CopilotPayload>(content)
@@ -359,13 +366,16 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   ```
 
 - [ ] **3.3 Wire into Main.kt**
+  - **Do NOT modify the existing UI** (dummy agents, AgentCard, local `AgentStatus`/`Agent` types). The UI is replaced in Step 5. In this step, only add the watcher and deployer initialization alongside the existing code.
+  - Note: `Main.kt` has a local `AgentStatus` enum and `Agent` data class from the scaffold. These will conflict with imports from the `model` package — use fully-qualified names or avoid importing `com.agentpulse.model.AgentStatus` in Main.kt for now. Step 5 removes the local types.
   - Create `AgentStateManager` with all stub providers from Step 2
   - Create `HookDeployer()` — call `deployIfNeeded()` on first launch
   - Create `HookEventWatcher(stateManager)` — call `start()` in a `LaunchedEffect`
   - Pass `stateManager.agents` to UI (for Step 5)
 
-  Key wiring in `Main.kt`:
+  Key wiring in `Main.kt` (add near the top of the `main()` function, before the `application` block):
   ```kotlin
+  // --- Step 3: Hook infrastructure (add BEFORE the `application { }` block) ---
   val providers = listOf(
       CopilotCliProvider(),
       ClaudeCodeProvider(),
@@ -381,12 +391,19 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   // Start event watcher
   val watcher = HookEventWatcher(stateManager)
 
-  // Inside Compose application:
+  // Inside Compose `application { }`, add a LaunchedEffect:
   LaunchedEffect(Unit) {
       watcher.start()
   }
 
-  // Pass stateManager.agents to UI composables (for Step 5)
+  // stateManager.agents is available for Step 5 to observe
+  ```
+  **Imports to add** (use fully-qualified `com.agentpulse.model.AgentStatus` if needed to avoid collision with local `AgentStatus`):
+  ```kotlin
+  import com.agentpulse.deploy.HookDeployer
+  import com.agentpulse.watcher.HookEventWatcher
+  import com.agentpulse.provider.AgentStateManager
+  import com.agentpulse.provider.*  // All provider implementations
   ```
 
 - [ ] **3.4 Verify**

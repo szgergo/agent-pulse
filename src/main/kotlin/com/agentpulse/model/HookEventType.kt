@@ -102,7 +102,7 @@ enum class HookEventType {
         private val index: Map<String, HookEventType> =
             entries
                 .filter { it != Unknown }
-                .associate { it.name.lowercase() to it }
+                .associateBy { it.name.lowercase() }
 
         /**
          * Resolve a raw event-type string (from the hook filename or payload) to a

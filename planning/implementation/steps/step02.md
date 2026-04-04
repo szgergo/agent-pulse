@@ -158,7 +158,7 @@
           private val index: Map<String, HookEventType> =
               entries
                   .filter { it != Unknown }
-                  .associate { it.name.lowercase() to it }
+                  .associateBy { it.name.lowercase() }
 
           fun fromRaw(raw: String): HookEventType = index[raw.lowercase()] ?: Unknown
       }

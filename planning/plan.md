@@ -546,16 +546,18 @@ Each step is a separate branch + PR. Within each step, sub-tasks are sequential.
 
 ---
 
-### Step 2: data-model — Core data model + provider system
+### Step 2: data-model — Core data model + provider system [DONE]
 
 **Goal**: Define all Kotlin data classes, interfaces, and type-safe enums. Establish the push-based provider API.
 
+**Status**: Completed and merged to `main` via PR #3.
+
 **Key deliverables**:
-- `AgentState` data class — immutable snapshot of an agent session (id, name, agentType, status, pid, sessionId, cwd, model, eventCount, lastActivity, uptimeSecs, tokenUsage, extra)
+- `AgentState` data class — immutable snapshot of an agent session (id, name, agentType, status, pid, sessionId, cwd, model, eventCount, lastActivity, uptime, tokenUsage, extra)
 - `HookEvent` data class — parsed from hook event files (agent, eventType, pid, timestamp, payload: HookPayload)
 - `HookPayload` sealed interface — per-agent typed payload classes (CopilotPayload, ClaudePayload, CursorPayload, CodexPayload, GeminiPayload) with @Serializable + @SerialName annotations
 - `AgentType` enum, `AgentStatus` enum
-- `AgentProvider` interface — single method: `fun processEvent(event: HookEvent, currentState: AgentState?): AgentState`
+- `AgentProvider` interface — single method: `fun reconcileAgentState(event: HookEvent, currentState: AgentState?): AgentState`
 - `AgentStateManager` — routes events to providers, manages `StateFlow<List<AgentState>>`
 - `SearchIndexer` interface + `NoopIndexer`
 - Stub providers for all 5 agent types
@@ -582,11 +584,11 @@ Each step is a separate branch + PR. Within each step, sub-tasks are sequential.
 
 ### Step 4: copilot — Copilot CLI hook provider
 
-**Goal**: Deploy Copilot CLI hook config and implement `CopilotCliProvider.processEvent()`.
+**Goal**: Deploy Copilot CLI hook config and implement `CopilotCliProvider.reconcileAgentState()`.
 
 **Key deliverables**:
 - Hook config: `~/.copilot/hooks/agent-pulse.json` mapping sessionStart, sessionEnd, postToolUse, userPromptSubmitted
-- `CopilotCliProvider.processEvent()` — handles 4 event types, creates/updates `AgentState`
+- `CopilotCliProvider.reconcileAgentState()` — handles 4 event types, creates/updates `AgentState`
 - Session ID resolution: PID → scan for `inuse.<PID>.lock` → parent dir UUID
 - `HookDeployer.deployCopilotCliHooks()` integration
 
@@ -611,11 +613,11 @@ Each step is a separate branch + PR. Within each step, sub-tasks are sequential.
 
 ### Step 6: claude — Claude Code hook provider
 
-**Goal**: Deploy Claude Code hook config and implement `ClaudeCodeProvider.processEvent()`.
+**Goal**: Deploy Claude Code hook config and implement `ClaudeCodeProvider.reconcileAgentState()`.
 
 **Key deliverables**:
 - Hook config: merge `PostToolUse` entry into `~/.claude/settings.json` (preserving existing settings)
-- `ClaudeCodeProvider.processEvent()` — handles PostToolUse events, synthetic session start on first event per PID
+- `ClaudeCodeProvider.reconcileAgentState()` — handles PostToolUse events, synthetic session start on first event per PID
 - Session ID: PID-based (no explicit session ID in Claude Code hooks)
 - `HookDeployer.deployClaudeCodeHooks()` — safe JSON merge logic
 
@@ -625,11 +627,11 @@ Each step is a separate branch + PR. Within each step, sub-tasks are sequential.
 
 ### Step 7: cursor — Cursor hook provider
 
-**Goal**: Deploy Cursor hook config and implement `CursorProvider.processEvent()`.
+**Goal**: Deploy Cursor hook config and implement `CursorProvider.reconcileAgentState()`.
 
 **Key deliverables**:
 - Hook config: `~/.cursor/hooks.json` (Cursor v1.7+ first-class hooks support)
-- `CursorProvider.processEvent()` — handles sessionStart, afterFileEdit, postToolUse events
+- `CursorProvider.reconcileAgentState()` — handles SessionStart, AfterFileEdit, PostToolUse events
 - Session ID: `conversation_id` from hook payload
 - `HookDeployer.deployCursorHooks()` integration
 
@@ -642,8 +644,8 @@ Each step is a separate branch + PR. Within each step, sub-tasks are sequential.
 **Goal**: Deploy hook configs and implement providers for both Codex CLI and Gemini CLI.
 
 **Key deliverables**:
-- Codex: `notify` command in `~/.codex/config.toml`, `CodexProvider.processEvent()`, session ID from `thread-id`
-- Gemini: merge into `~/.gemini/settings.json`, `GeminiProvider.processEvent()`, PID-based session ID
+- Codex: `notify` command in `~/.codex/config.toml`, `CodexProvider.reconcileAgentState()`, session ID from `thread-id`
+- Gemini: merge into `~/.gemini/settings.json`, `GeminiProvider.reconcileAgentState()`, PID-based session ID
 - `HookDeployer.deployCodexHooks()` and `HookDeployer.deployGeminiHooks()`
 
 > 📄 **Full implementation details**: See [`steps/step08.md`](implementation/steps/step08.md)

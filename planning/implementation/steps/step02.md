@@ -10,11 +10,11 @@
 
 **Pre-check**: Step 1 PR is merged. `git checkout main && git pull`. `./gradlew run` shows the tray app.
 
-**App state AFTER this step**: Same visible behavior as Step 1. But now the code has: `AgentState`/`HookEvent` data classes, `AgentProvider` interface with `processEvent()` method, `AgentStateManager` (central state holder with `StateFlow`), `SearchIndexer` interface, and stub providers for all 5 agent types. `./gradlew build` passes with zero warnings.
+**App state AFTER this step**: Same visible behavior as Step 1. But now the code has: `AgentState`/`HookEvent` data classes, `AgentProvider` interface with `reconcileAgentState()` method, `AgentStateManager` (central state holder with `StateFlow`), `SearchIndexer` interface, and stub providers for all 5 agent types. `./gradlew build` passes with zero warnings.
 
 ---
 
-- [ ] **2.1 Add dependencies to build.gradle.kts**
+- [x] **2.1 Add dependencies to build.gradle.kts**
   Add to the `dependencies` block:
   ```kotlin
   // JSON parsing (hook event payloads)
@@ -33,7 +33,7 @@
   ```
   **Note**: No OSHI, no sqlite-jdbc, no kaml. The MVP uses hooks+FileWatch only.
 
-- [ ] **2.2 Create src/main/kotlin/com/agentpulse/model/AgentType.kt**
+- [x] **2.2 Create src/main/kotlin/com/agentpulse/model/AgentType.kt**
   ```kotlin
   package com.agentpulse.model
 
@@ -48,14 +48,14 @@
   }
   ```
 
-- [ ] **2.3 Create src/main/kotlin/com/agentpulse/model/AgentStatus.kt**
+- [x] **2.3 Create src/main/kotlin/com/agentpulse/model/AgentStatus.kt**
   ```kotlin
   package com.agentpulse.model
 
   enum class AgentStatus { Running, Idle, Stopped, Error }
   ```
 
-- [ ] **2.4 Create src/main/kotlin/com/agentpulse/model/HookPayload.kt**
+- [x] **2.4 Create src/main/kotlin/com/agentpulse/model/HookPayload.kt**
   Typed payload classes — one per agent. Parsed from hook event file content at the
   watcher boundary (Step 3). From this point on, all code works with typed Kotlin
   objects — no raw JSON access.
@@ -108,25 +108,88 @@
   ) : HookPayload
   ```
 
-- [ ] **2.5 Create src/main/kotlin/com/agentpulse/model/HookEvent.kt**
+- [x] **2.5 Create src/main/kotlin/com/agentpulse/model/HookEventType.kt**
+  Typed enum of all documented hook event types across all supported agents.
+  Use `fromRaw(String)` to map the raw filename token to a typed constant via a
+  case-insensitive name match; falls back to `Unknown` for unrecognised values.
+  ```kotlin
+  package com.agentpulse.model
+
+  enum class HookEventType {
+      // Lifecycle — shared across Copilot CLI, Claude Code, Gemini CLI, Cursor
+      // (fromRaw is case-insensitive, so "sessionStart" and "SessionStart" both resolve here)
+      SessionStart,
+      SessionEnd,
+      // Tool execution — Copilot CLI, Claude Code, Cursor
+      PreToolUse,
+      PostToolUse,
+      // Agent completion — Copilot CLI, Claude Code, Cursor
+      Stop,
+      SubagentStop,
+      // Context management — Claude Code, Cursor
+      PreCompact,
+      // Copilot CLI specific
+      UserPromptSubmitted,
+      AgentStop,
+      ErrorOccurred,
+      // Claude Code specific
+      UserPromptSubmit,
+      Notification,
+      // Gemini CLI specific
+      BeforeTool,
+      AfterTool,
+      BeforeAgent,
+      AfterAgent,
+      BeforeModel,
+      AfterModel,
+      // Cursor specific
+      BeforeShellExecution,
+      AfterShellExecution,
+      AfterFileEdit,
+      BeforeSubmitPrompt,
+      BeforeMcpExecution,
+      AfterMcpExecution,
+      // Codex CLI specific
+      Notify,
+      // Fallback
+      Unknown;
+
+      companion object {
+          private val index: Map<String, HookEventType> =
+              entries
+                  .filter { it != Unknown }
+                  .associateBy { it.name.lowercase() }
+
+          fun fromRaw(raw: String): HookEventType = index[raw.lowercase()] ?: Unknown
+      }
+  }
+  ```
+
+- [x] **2.6 Create src/main/kotlin/com/agentpulse/model/HookEvent.kt**
   Parsed from hook event filename + typed payload. The filename encodes metadata:
   `<timestamp>-<agent>-<eventType>-<pid>.json`
   ```kotlin
   package com.agentpulse.model
 
+  import java.time.Instant
+
   data class HookEvent(
       val agent: AgentType,
-      val eventType: String,       // "sessionStart", "postToolUse", "sessionEnd", etc.
-      val pid: Int,                // Agent PID (from $PPID in hook script)
-      val timestamp: Long,         // Epoch seconds (from filename)
-      val payload: HookPayload,    // Typed payload — parsed at watcher boundary
+      val eventType: HookEventType,    // Typed event — resolved from hook filename or payload
+      val pid: Int,                    // Agent PID (from $PPID in hook script)
+      val timestamp: Instant,          // Point in time when the event occurred (from filename)
+      val payload: HookPayload,        // Typed payload — parsed at watcher boundary
   )
   ```
 
-- [ ] **2.6 Create src/main/kotlin/com/agentpulse/model/AgentState.kt**
+- [x] **2.7 Create src/main/kotlin/com/agentpulse/model/AgentState.kt**
   Snapshot of an agent's current state, projected from hook events by the provider.
   ```kotlin
   package com.agentpulse.model
+
+  import java.nio.file.Path
+  import java.time.Instant
+  import kotlin.time.Duration
 
   data class AgentState(
       val id: String,                    // "{type}_{sessionId}" or "{type}_{pid}"
@@ -135,17 +198,17 @@
       val status: AgentStatus,
       val pid: Int,
       val sessionId: String? = null,     // Agent-specific session identifier
-      val cwd: String? = null,           // Working directory (if available from hook payload)
+      val cwd: Path? = null,             // Working directory (if available from hook payload)
       val model: String? = null,         // Post-MVP enrichment
       val eventCount: Int = 0,           // Number of hook events received for this session
-      val lastActivity: Long? = null,    // Epoch millis of most recent hook event
-      val uptimeSecs: Long? = null,
+      val lastActivity: Instant? = null, // Timestamp of the most recent hook event
+      val uptime: Duration? = null,      // How long the session has been active
       val tokenUsage: Long? = null,      // Post-MVP enrichment
       val extra: Map<String, String> = emptyMap(),
   )
   ```
 
-- [ ] **2.7 Create src/main/kotlin/com/agentpulse/provider/AgentProvider.kt**
+- [x] **2.8 Create src/main/kotlin/com/agentpulse/provider/AgentProvider.kt**
   Pure event processor. Each implementation knows how to translate its agent's hook JSON
   into the universal `AgentState`. The provider is stateless — state is held by `AgentStateManager`.
   ```kotlin
@@ -158,27 +221,23 @@
   /**
    * Translates agent-specific hook events into universal [AgentState].
    *
-   * Each implementation knows how to interpret its agent's JSON payload —
-   * extracting session IDs, status, working directory, etc.
-   *
    * Providers are pure functions: given an event and optional current state,
-   * they return an updated state. State management is handled by [AgentStateManager].
+   * they return a reconciled state. State management is handled by [AgentStateManager].
    */
   interface AgentProvider {
       val agentType: AgentType
 
       /**
-       * Process a hook event and return the updated agent state.
+       * Reconcile an incoming hook event with the existing session state.
        *
-       * @param event The hook event to process.
-       * @param currentState The current state for this session, or null if this is the first event.
-       * @return Updated [AgentState] reflecting the new event.
+       * If [currentState] is null, produce a fresh [AgentState] from the event.
+       * Otherwise, merge the event into [currentState] and return the updated snapshot.
        */
-      fun processEvent(event: HookEvent, currentState: AgentState?): AgentState
+      fun reconcileAgentState(event: HookEvent, currentState: AgentState?): AgentState
   }
   ```
 
-- [ ] **2.8 Create src/main/kotlin/com/agentpulse/provider/AgentStateManager.kt**
+- [x] **2.9 Create src/main/kotlin/com/agentpulse/provider/AgentStateManager.kt**
   Central state holder. Routes hook events to providers, maintains the reactive state
   that Compose UI observes. Replaces both `HookEventStore` and `ProviderRegistry`.
   ```kotlin
@@ -203,8 +262,8 @@
       private val providerMap: Map<AgentType, AgentProvider> =
           providers.associateBy { it.agentType }
 
-      private val _agents = MutableStateFlow<List<AgentState>>(emptyList())
-      val agents: StateFlow<List<AgentState>> = _agents.asStateFlow()
+      private val _mutableAgentList = MutableStateFlow<List<AgentState>>(emptyList())
+      val agents: StateFlow<List<AgentState>> = _mutableAgentList.asStateFlow()
 
       /**
        * Process an incoming hook event. Called by FileWatcher on each new event file.
@@ -212,20 +271,20 @@
        */
       fun onEvent(event: HookEvent) {
           val provider = providerMap[event.agent] ?: return
-          val current = _agents.value
-          val existingState = current.find { it.agentType == event.agent && it.pid == event.pid }
-          val newState = provider.processEvent(event, existingState)
+          val currentAgentStates = _mutableAgentList.value
+          val existingState = currentAgentStates.find { it.agentType == event.agent && it.pid == event.pid }
+          val newState = provider.reconcileAgentState(event, existingState)
 
-          _agents.value = if (existingState != null) {
-              current.map { if (it.id == newState.id) newState else it }
+          _mutableAgentList.value = if (existingState != null) {
+              currentAgentStates.map { if (it.id == newState.id) newState else it }
           } else {
-              current + newState
+              currentAgentStates + newState
           }
       }
   }
   ```
 
-- [ ] **2.9 Create src/main/kotlin/com/agentpulse/search/SearchIndexer.kt**
+- [x] **2.10 Create src/main/kotlin/com/agentpulse/search/SearchIndexer.kt**
   ```kotlin
   package com.agentpulse.search
 
@@ -238,7 +297,7 @@
   }
   ```
 
-- [ ] **2.10 Create src/main/kotlin/com/agentpulse/search/NoopIndexer.kt**
+- [x] **2.11 Create src/main/kotlin/com/agentpulse/search/NoopIndexer.kt**
   ```kotlin
   package com.agentpulse.search
 
@@ -251,8 +310,8 @@
   }
   ```
 
-- [ ] **2.11 Create stub providers** — one file per agent type in `src/main/kotlin/com/agentpulse/provider/`
-  Each stub returns a minimal `AgentState` from `processEvent()`.
+- [x] **2.12 Create stub providers** — one file per agent type in `src/main/kotlin/com/agentpulse/provider/`
+  Each stub returns a minimal `AgentState` from `reconcileAgentState()`.
   Example for CopilotCliProvider:
   ```kotlin
   package com.agentpulse.provider
@@ -261,11 +320,11 @@
 
   class CopilotCliProvider : AgentProvider {
       override val agentType = AgentType.CopilotCli
-      override fun processEvent(event: HookEvent, currentState: AgentState?): AgentState {
+      override fun reconcileAgentState(event: HookEvent, currentState: AgentState?): AgentState {
           // Stub — real implementation in Step 4
           return currentState?.copy(
               eventCount = currentState.eventCount + 1,
-              lastActivity = event.timestamp * 1000,
+              lastActivity = event.timestamp,
           ) ?: AgentState(
               id = "${agentType.name}_${event.pid}",
               name = "${agentType.displayName} — PID ${event.pid}",
@@ -273,7 +332,7 @@
               status = AgentStatus.Running,
               pid = event.pid,
               eventCount = 1,
-              lastActivity = event.timestamp * 1000,
+              lastActivity = event.timestamp,
           )
       }
   }
@@ -284,19 +343,19 @@
     - `CodexProvider` — `AgentType.CodexCli`
     - `GeminiProvider` — `AgentType.GeminiCli`
 
-- [ ] **2.12 Verify compilation**
+- [x] **2.13 Verify compilation**
   ```bash
   cd <project-root> && ./gradlew build
   ```
   Must compile with zero errors. Then `./gradlew run` — app should launch unchanged.
 
-- [ ] **2.13 Commit, push, and open PR**
+- [x] **2.14 Commit, push, and open PR**
   ```bash
   git checkout -b step-2-data-model
   git add -A && git commit -m "feat: data model, provider system, and state manager
 
   - AgentState, HookEvent, AgentType, AgentStatus data classes
-  - AgentProvider interface with processEvent(event, currentState?) → AgentState
+  - AgentProvider interface with reconcileAgentState(event, currentState?) → AgentState
   - AgentStateManager: central state holder with StateFlow, routes events to providers
   - SearchIndexer interface + NoopIndexer
   - Stub providers for Copilot, Claude, Cursor, Codex, Gemini
@@ -304,6 +363,6 @@
   Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
   git push -u origin step-2-data-model
   gh pr create --title "Step 2: Data model and provider system" \
-    --body "Core types, AgentProvider with processEvent(), AgentStateManager with StateFlow, stub providers." \
+    --body "Core types, AgentProvider with reconcileAgentState(), AgentStateManager with StateFlow, stub providers." \
     --base main
   ```

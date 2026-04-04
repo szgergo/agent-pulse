@@ -8,11 +8,11 @@
 
 ---
 
-**Goal**: Deploy Cursor hook config and implement `CursorProvider.processEvent()` so that Cursor AI activity is captured via hooks and flows through the dashboard.
+**Goal**: Deploy Cursor hook config and implement `CursorProvider.reconcileAgentState()` so that Cursor AI activity is captured via hooks and flows through the dashboard.
 
 **Pre-check**: Step 6 PR is merged. `git checkout main && git pull`.
 
-**App state AFTER this step**: When Cursor AI features are used (chat, edits, tool calls), events flow through hooks → `report.sh` → event files → FileWatcher → `CursorProvider.processEvent()` → dashboard. Cursor sessions appear in the agent list with session identity from `conversation_id`, file-edit tracking, and event counts.
+**App state AFTER this step**: When Cursor AI features are used (chat, edits, tool calls), events flow through hooks → `report.sh` → event files → FileWatcher → `CursorProvider.reconcileAgentState()` → dashboard. Cursor sessions appear in the agent list with session identity from `conversation_id`, file-edit tracking, and event counts.
 
 ---
 
@@ -44,23 +44,23 @@
         - Write the merged config back
         - Log the deployed hook config path
 
-- [ ] **7.2 Implement CursorProvider.processEvent()**
+- [ ] **7.2 Implement CursorProvider.reconcileAgentState()**
     - Replace the stub provider with full Cursor-specific event handling
     - Session identity: use `conversation_id` from the hook JSON payload (falls back to PID)
     - Track file edits: count edits, record last-edited file in `extra`
-    - Handle `sessionStart`, `afterFileEdit`, and generic events (e.g. `postToolUse`)
+    - Handle `SessionStart`, `AfterFileEdit`, and generic events (e.g. `PostToolUse`)
 
   ```kotlin
   class CursorProvider : AgentProvider {
       override val agentType = AgentType.CursorIde
 
-      override fun processEvent(event: HookEvent, currentState: AgentState?): AgentState {
+      override fun reconcileAgentState(event: HookEvent, currentState: AgentState?): AgentState {
           val p = event.payload as CursorPayload
           val conversationId = p.conversationId   // @SerialName("conversation_id")
           val sessionId = conversationId ?: event.pid.toString()
 
           return when (event.eventType) {
-              "sessionStart" -> AgentState(
+              HookEventType.SessionStart -> AgentState(
                   id = "${agentType.name}_$sessionId",
                   name = "Cursor — ${conversationId?.take(8) ?: "PID ${event.pid}"}",
                   agentType = agentType,
@@ -68,13 +68,13 @@
                   pid = event.pid,
                   sessionId = conversationId,
                   eventCount = 1,
-                  lastActivity = event.timestamp * 1000,
+                  lastActivity = event.timestamp,
               )
-              "afterFileEdit" -> {
+              HookEventType.AfterFileEdit -> {
                   val filePath = p.filePath          // @SerialName("file_path")
                   currentState?.copy(
                       eventCount = currentState.eventCount + 1,
-                      lastActivity = event.timestamp * 1000,
+                      lastActivity = event.timestamp,
                       extra = currentState.extra + buildMap {
                           filePath?.let { put("lastEditedFile", it) }
                           put("fileEdits", ((currentState.extra["fileEdits"]?.toIntOrNull() ?: 0) + 1).toString())
@@ -83,7 +83,7 @@
               }
               else -> currentState?.copy(
                   eventCount = (currentState.eventCount) + 1,
-                  lastActivity = event.timestamp * 1000,
+                  lastActivity = event.timestamp,
               ) ?: fallbackState(event, sessionId)
           }
       }
@@ -96,7 +96,7 @@
           pid = event.pid,
           sessionId = sessionId,
           eventCount = 1,
-          lastActivity = event.timestamp * 1000,
+          lastActivity = event.timestamp,
       )
   }
   ```
@@ -109,16 +109,16 @@
 - [ ] **7.4 Commit, push, and open PR**
   ```bash
   git checkout -b step-7-cursor-provider
-  git add -A && git commit -m "feat: Cursor hook provider with processEvent()
+  git add -A && git commit -m "feat: Cursor hook provider with reconcileAgentState()
 
   - Deploy ~/.cursor/hooks.json for sessionStart, afterFileEdit, postToolUse
   - HookDeployer.deployCursorHooks() with merge-if-exists logic
-  - CursorProvider.processEvent() with conversation_id session identity
+  - CursorProvider.reconcileAgentState() with conversation_id session identity
   - Track file edits count and last-edited file in extra map
 
   Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
   git push -u origin step-7-cursor-provider
   gh pr create --title "Step 7: Cursor hook provider" \
-    --body "Deploy Cursor hook config, implement CursorProvider.processEvent() with conversation_id session identity and file-edit tracking." \
+    --body "Deploy Cursor hook config, implement CursorProvider.reconcileAgentState() with conversation_id session identity and file-edit tracking." \
     --base main
   ```

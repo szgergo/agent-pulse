@@ -44,6 +44,50 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
 
 ---
 
+- [ ] **3.0 Extend existing model files**
+
+  Step 2 is already merged. `HookEventWatcher` calls two methods that don't exist in the codebase yet — add them now, before creating `HookEventWatcher.kt`.
+
+  **`AgentType.kt`** — add companion object with `fromRawName()`:
+  ```kotlin
+  // Add inside the AgentType enum, after the last entry (GeminiCli)
+  ;  // semicolon required before companion in a Kotlin enum
+
+  companion object {
+      fun fromRawName(name: String): AgentType? = when (name) {
+          "copilot-cli" -> CopilotCli
+          "claude-code" -> ClaudeCode
+          "cursor" -> CursorIde
+          "codex-cli" -> CodexCli
+          "gemini-cli" -> GeminiCli
+          else -> null
+      }
+  }
+  ```
+
+  **`HookPayload.kt`** — add companion object to the sealed interface + `Json` import:
+  ```kotlin
+  // Add this import at the top of HookPayload.kt:
+  import kotlinx.serialization.json.Json
+
+  // Add companion inside the HookPayload sealed interface body:
+  companion object {
+      private val json = Json { ignoreUnknownKeys = true }
+
+      fun fromRawPayload(agent: AgentType, rawJson: String): HookPayload = when (agent) {
+          AgentType.CopilotCli, AgentType.CopilotVsCode, AgentType.CopilotIntelliJ ->
+              json.decodeFromString<CopilotPayload>(rawJson)
+          AgentType.ClaudeCode -> json.decodeFromString<ClaudePayload>(rawJson)
+          AgentType.CursorIde -> json.decodeFromString<CursorPayload>(rawJson)
+          AgentType.CodexCli -> json.decodeFromString<CodexPayload>(rawJson)
+          AgentType.GeminiCli -> json.decodeFromString<GeminiPayload>(rawJson)
+      }
+  }
+  ```
+  `decodeFromString` is an extension from `kotlinx-serialization-json` (already on classpath from Step 2). No additional import needed for it — it resolves via the `Json` receiver.
+
+  Run `./gradlew build` after this sub-task to confirm zero compile errors before moving to 3.1.
+
 - [ ] **3.1 Create HookEventWatcher.kt**
 
   `src/main/kotlin/com/agentpulse/watcher/HookEventWatcher.kt`
@@ -63,7 +107,7 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   - Startup scan: on launch, process any existing files in `events/` dir (recovery after restart)
     - Groups files by `(agent, pid)`, keeps only the latest file per group, deletes stale ones
     - Prevents processing hundreds of stale events accumulated while agent-pulse was offline
-  - Periodic PID validation: every 30s, check if PIDs of Running agents are still alive via `ProcessHandle.of(pid).isPresent`; if dead, fire synthetic `sessionEnd` event
+  - Periodic PID validation: every 5s, check if PIDs of Running agents are still alive via `ProcessHandle.of(pid).isPresent`; if dead, fire synthetic `sessionEnd` event
   - Log: `[agent-pulse] Watching: ~/.agent-pulse/events/`
   - Log: `[agent-pulse] Event: <agent>/<eventType> (PID <pid>)`
 

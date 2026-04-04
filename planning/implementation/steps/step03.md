@@ -89,7 +89,6 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   import kotlinx.coroutines.isActive
   import kotlinx.coroutines.launch
   import kotlinx.coroutines.runInterruptible
-  import kotlinx.serialization.json.Json
   import java.nio.file.FileSystems
   import java.nio.file.Files
   import java.nio.file.Path
@@ -107,8 +106,12 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
       private val stateManager: AgentStateManager,
       private val eventsDir: Path = Path.of(System.getProperty("user.home"), ".agent-pulse", "events"),
   ) {
+      private companion object {
+          const val MAX_HOOK_EVENT_SIZE_BYTES = 64 * 1024
+          const val PID_VALIDATION_INTERVAL_MS = 5_000L
+      }
+
       private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-      private val json = Json { ignoreUnknownKeys = true }
 
       private fun Path.isProcessableEvent(): Boolean =
           name.endsWith(".json") && !name.startsWith(".tmp.")
@@ -178,18 +181,18 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
               // Guard: hook event files are ~225 bytes. Skip anything suspiciously large
               // to avoid OOM if a rogue process writes to our events dir.
               val fileSize = file.fileSize()
-              if (fileSize > 64 * 1024) {  // 64 KB — generous for a JSON hook event
+              if (fileSize > MAX_HOOK_EVENT_SIZE_BYTES) {  // 64 KB — generous for a JSON hook event
                   System.err.println("[agent-pulse] Skipping oversized event file (${fileSize} bytes): ${file.name}")
                   return
               }
 
               val (timestampStr, agentName, eventType, pidStr) = parts
-              val agent = parseAgentType(agentName) ?: return
+              val agent = AgentType.fromRawName(agentName) ?: return
               val pid = pidStr.toIntOrNull() ?: return
               val epochSeconds = timestampStr.toLongOrNull() ?: return
 
               val content = file.readText()
-              val payload = parsePayload(agent, content)
+              val payload = HookPayload.fromRawPayload(agent, content)
 
               val hookEvent = HookEvent(
                   agent = agent,
@@ -224,7 +227,13 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
 
           for ((_, files) in grouped) {
               val stale = files.dropLast(1)
-              stale.forEach { it.deleteIfExists() }
+              stale.forEach { staleFile ->
+                  try {
+                      staleFile.deleteIfExists()
+                  } catch (e: Exception) {
+                      System.err.println("[agent-pulse] Failed to delete stale event ${staleFile.name}: ${e.message}")
+                  }
+              }
               if (stale.isNotEmpty()) {
                   println("[agent-pulse] Startup: skipped ${stale.size} stale events for group")
               }
@@ -235,7 +244,7 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
       private fun startPidValidation() {
           scope.launch {
               while (isActive) {
-                  delay(30_000)
+                  delay(PID_VALIDATION_INTERVAL_MS)
                   stateManager.agents.value
                       .filter { it.status == com.agentpulse.model.AgentStatus.Running }
                       .forEach { agent ->
@@ -261,26 +270,6 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
                           }
                       }
               }
-          }
-      }
-
-      private fun parseAgentType(name: String): AgentType? = when (name) {
-          "copilot-cli" -> AgentType.CopilotCli
-          "claude-code" -> AgentType.ClaudeCode
-          "cursor" -> AgentType.CursorIde
-          "codex-cli" -> AgentType.CodexCli
-          "gemini-cli" -> AgentType.GeminiCli
-          else -> null
-      }
-
-      private fun parsePayload(agent: AgentType, content: String): HookPayload {
-          return when (agent) {
-              AgentType.CopilotCli, AgentType.CopilotVsCode, AgentType.CopilotIntelliJ ->
-                  json.decodeFromString<CopilotPayload>(content)
-              AgentType.ClaudeCode -> json.decodeFromString<ClaudePayload>(content)
-              AgentType.CursorIde -> json.decodeFromString<CursorPayload>(content)
-              AgentType.CodexCli -> json.decodeFromString<CodexPayload>(content)
-              AgentType.GeminiCli -> json.decodeFromString<GeminiPayload>(content)
           }
       }
 

@@ -44,7 +44,18 @@
       ClaudeCode("Claude Code", "🧠"),
       CursorIde("Cursor", "⚡"),
       CodexCli("Codex CLI", "📦"),
-      GeminiCli("Gemini CLI", "💎"),
+      GeminiCli("Gemini CLI", "💎");
+
+      companion object {
+          fun fromRawName(name: String): AgentType? = when (name) {
+              "copilot-cli" -> CopilotCli
+              "claude-code" -> ClaudeCode
+              "cursor" -> CursorIde
+              "codex-cli" -> CodexCli
+              "gemini-cli" -> GeminiCli
+              else -> null
+          }
+      }
   }
   ```
 
@@ -64,14 +75,28 @@
 
   import kotlinx.serialization.SerialName
   import kotlinx.serialization.Serializable
+  import kotlinx.serialization.json.Json
 
   /**
    * Typed hook event payload. Each agent has its own data class reflecting
-   * the JSON schema of its hook events. Parsed in HookEventWatcher (Step 3).
+   * the JSON schema of its hook events. Parsed at the watcher boundary (Step 3).
    */
   @Serializable
   sealed interface HookPayload {
       val cwd: String?
+
+      companion object {
+          private val json = Json { ignoreUnknownKeys = true }
+
+          fun fromRawPayload(agent: AgentType, rawJson: String): HookPayload = when (agent) {
+              AgentType.CopilotCli, AgentType.CopilotVsCode, AgentType.CopilotIntelliJ ->
+                  json.decodeFromString<CopilotPayload>(rawJson)
+              AgentType.ClaudeCode -> json.decodeFromString<ClaudePayload>(rawJson)
+              AgentType.CursorIde -> json.decodeFromString<CursorPayload>(rawJson)
+              AgentType.CodexCli -> json.decodeFromString<CodexPayload>(rawJson)
+              AgentType.GeminiCli -> json.decodeFromString<GeminiPayload>(rawJson)
+          }
+      }
   }
 
   @Serializable

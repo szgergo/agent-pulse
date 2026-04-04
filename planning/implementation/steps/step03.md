@@ -20,6 +20,10 @@
 - `src/main/kotlin/com/agentpulse/watcher/HookEventWatcher.kt`
 - `src/main/kotlin/com/agentpulse/deploy/HookDeployer.kt`
 
+**Files to modify**:
+- `src/main/kotlin/com/agentpulse/model/AgentType.kt`
+- `src/main/kotlin/com/agentpulse/model/HookPayload.kt`
+
 **Data flow** (for reference):
 ```
 Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
@@ -48,22 +52,26 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
 
   Step 2 is already merged. `HookEventWatcher` calls two methods that don't exist in the codebase yet — add them now, before creating `HookEventWatcher.kt`.
 
-  **`AgentType.kt`** — add companion object with `fromRawName()`:
+  **`AgentType.kt`** — replace the entire file with the updated enum (adds `rawName` constructor param and `forName()` companion):
   ```kotlin
-  // Add inside the AgentType enum, after the last entry (GeminiCli)
-  ;  // semicolon required before companion in a Kotlin enum
+  package com.agentpulse.model
 
-  companion object {
-      fun fromRawName(name: String): AgentType? = when (name) {
-          "copilot-cli" -> CopilotCli
-          "claude-code" -> ClaudeCode
-          "cursor" -> CursorIde
-          "codex-cli" -> CodexCli
-          "gemini-cli" -> GeminiCli
-          else -> null
+  enum class AgentType(val rawName: String, val displayName: String, val icon: String) {
+      CopilotCli("copilot-cli", "Copilot CLI", "🤖"),
+      CopilotVsCode("copilot-vscode", "Copilot (VS Code)", "🤖"),
+      CopilotIntelliJ("copilot-intellij", "Copilot (IntelliJ)", "🤖"),
+      ClaudeCode("claude-code", "Claude Code", "🧠"),
+      CursorIde("cursor", "Cursor", "⚡"),
+      CodexCli("codex-cli", "Codex CLI", "📦"),
+      GeminiCli("gemini-cli", "Gemini CLI", "💎");
+
+      companion object {
+          private val byRawName = entries.associateBy { it.rawName }
+          fun forName(name: String): AgentType? = byRawName[name]
       }
   }
   ```
+  `rawName` is the string sent by the hook script (e.g. `"copilot-cli"`). It lives on the entry itself — adding a new agent type cannot go out of sync with the lookup map.
 
   **`HookPayload.kt`** — add companion object to the sealed interface + `Json` import:
   ```kotlin
@@ -164,7 +172,6 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
           Files.createDirectories(eventsDir)
           startWatchingWithRecovery()
           startPidValidation()
-          println("[agent-pulse] Watching: $eventsDir")
       }
 
       private fun startWatchingWithRecovery() {
@@ -178,6 +185,7 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
                   arrayOf(StandardWatchEventKinds.ENTRY_CREATE),
                   com.sun.nio.file.SensitivityWatchEventModifier.HIGH, // 100ms FSEvents latency on JBR
               )
+              println("[agent-pulse] Watching: $eventsDir")
 
               // 2. Process existing files (recovery after restart).
               //    WatchService is already registered, so new events arriving during this
@@ -231,7 +239,7 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
               }
 
               val (timestampStr, agentName, eventType, pidStr) = parts
-              val agent = AgentType.fromRawName(agentName) ?: return
+              val agent = AgentType.forName(agentName) ?: return
               val pid = pidStr.toIntOrNull() ?: return
               val epochSeconds = timestampStr.toLongOrNull() ?: return
 
@@ -287,6 +295,7 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
 
       private fun startPidValidation() {
           scope.launch {
+              println("[agent-pulse] Starting PID validation: reaping stale agent entries every ${PID_VALIDATION_INTERVAL_MS / 1000}s")
               while (isActive) {
                   delay(PID_VALIDATION_INTERVAL_MS)
                   stateManager.agents.value

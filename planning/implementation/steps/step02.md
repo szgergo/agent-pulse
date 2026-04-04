@@ -37,24 +37,18 @@
   ```kotlin
   package com.agentpulse.model
 
-  enum class AgentType(val displayName: String, val icon: String) {
-      CopilotCli("Copilot CLI", "🤖"),
-      CopilotVsCode("Copilot (VS Code)", "🤖"),
-      CopilotIntelliJ("Copilot (IntelliJ)", "🤖"),
-      ClaudeCode("Claude Code", "🧠"),
-      CursorIde("Cursor", "⚡"),
-      CodexCli("Codex CLI", "📦"),
-      GeminiCli("Gemini CLI", "💎");
+  enum class AgentType(val rawName: String, val displayName: String, val icon: String) {
+      CopilotCli("copilot-cli", "Copilot CLI", "🤖"),
+      CopilotVsCode("copilot-vscode", "Copilot (VS Code)", "🤖"),
+      CopilotIntelliJ("copilot-intellij", "Copilot (IntelliJ)", "🤖"),
+      ClaudeCode("claude-code", "Claude Code", "🧠"),
+      CursorIde("cursor", "Cursor", "⚡"),
+      CodexCli("codex-cli", "Codex CLI", "📦"),
+      GeminiCli("gemini-cli", "Gemini CLI", "💎");
 
       companion object {
-          fun fromRawName(name: String): AgentType? = when (name) {
-              "copilot-cli" -> CopilotCli
-              "claude-code" -> ClaudeCode
-              "cursor" -> CursorIde
-              "codex-cli" -> CodexCli
-              "gemini-cli" -> GeminiCli
-              else -> null
-          }
+          private val byRawName = entries.associateBy { it.rawName }
+          fun forName(name: String): AgentType? = byRawName[name]
       }
   }
   ```

@@ -546,9 +546,11 @@ Each step is a separate branch + PR. Within each step, sub-tasks are sequential.
 
 ---
 
-### Step 2: data-model — Core data model + provider system
+### Step 2: data-model — Core data model + provider system [DONE]
 
 **Goal**: Define all Kotlin data classes, interfaces, and type-safe enums. Establish the push-based provider API.
+
+**Status**: Completed and merged to `main` via PR #3.
 
 **Key deliverables**:
 - `AgentState` data class — immutable snapshot of an agent session (id, name, agentType, status, pid, sessionId, cwd, model, eventCount, lastActivity, uptime, tokenUsage, extra)

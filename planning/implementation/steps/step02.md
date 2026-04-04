@@ -14,7 +14,7 @@
 
 ---
 
-- [ ] **2.1 Add dependencies to build.gradle.kts**
+- [x] **2.1 Add dependencies to build.gradle.kts**
   Add to the `dependencies` block:
   ```kotlin
   // JSON parsing (hook event payloads)
@@ -33,7 +33,7 @@
   ```
   **Note**: No OSHI, no sqlite-jdbc, no kaml. The MVP uses hooks+FileWatch only.
 
-- [ ] **2.2 Create src/main/kotlin/com/agentpulse/model/AgentType.kt**
+- [x] **2.2 Create src/main/kotlin/com/agentpulse/model/AgentType.kt**
   ```kotlin
   package com.agentpulse.model
 
@@ -48,14 +48,14 @@
   }
   ```
 
-- [ ] **2.3 Create src/main/kotlin/com/agentpulse/model/AgentStatus.kt**
+- [x] **2.3 Create src/main/kotlin/com/agentpulse/model/AgentStatus.kt**
   ```kotlin
   package com.agentpulse.model
 
   enum class AgentStatus { Running, Idle, Stopped, Error }
   ```
 
-- [ ] **2.4 Create src/main/kotlin/com/agentpulse/model/HookPayload.kt**
+- [x] **2.4 Create src/main/kotlin/com/agentpulse/model/HookPayload.kt**
   Typed payload classes — one per agent. Parsed from hook event file content at the
   watcher boundary (Step 3). From this point on, all code works with typed Kotlin
   objects — no raw JSON access.
@@ -108,7 +108,7 @@
   ) : HookPayload
   ```
 
-- [ ] **2.5 Create src/main/kotlin/com/agentpulse/model/HookEventType.kt**
+- [x] **2.5 Create src/main/kotlin/com/agentpulse/model/HookEventType.kt**
   Typed enum of all documented hook event types across all supported agents.
   Use `fromRaw(String)` to map the raw filename token to a typed constant via a
   case-insensitive name match; falls back to `Unknown` for unrecognised values.
@@ -165,7 +165,7 @@
   }
   ```
 
-- [ ] **2.6 Create src/main/kotlin/com/agentpulse/model/HookEvent.kt**
+- [x] **2.6 Create src/main/kotlin/com/agentpulse/model/HookEvent.kt**
   Parsed from hook event filename + typed payload. The filename encodes metadata:
   `<timestamp>-<agent>-<eventType>-<pid>.json`
   ```kotlin
@@ -182,7 +182,7 @@
   )
   ```
 
-- [ ] **2.7 Create src/main/kotlin/com/agentpulse/model/AgentState.kt**
+- [x] **2.7 Create src/main/kotlin/com/agentpulse/model/AgentState.kt**
   Snapshot of an agent's current state, projected from hook events by the provider.
   ```kotlin
   package com.agentpulse.model
@@ -208,7 +208,7 @@
   )
   ```
 
-- [ ] **2.8 Create src/main/kotlin/com/agentpulse/provider/AgentProvider.kt**
+- [x] **2.8 Create src/main/kotlin/com/agentpulse/provider/AgentProvider.kt**
   Pure event processor. Each implementation knows how to translate its agent's hook JSON
   into the universal `AgentState`. The provider is stateless — state is held by `AgentStateManager`.
   ```kotlin
@@ -237,7 +237,7 @@
   }
   ```
 
-- [ ] **2.9 Create src/main/kotlin/com/agentpulse/provider/AgentStateManager.kt**
+- [x] **2.9 Create src/main/kotlin/com/agentpulse/provider/AgentStateManager.kt**
   Central state holder. Routes hook events to providers, maintains the reactive state
   that Compose UI observes. Replaces both `HookEventStore` and `ProviderRegistry`.
   ```kotlin
@@ -284,7 +284,7 @@
   }
   ```
 
-- [ ] **2.10 Create src/main/kotlin/com/agentpulse/search/SearchIndexer.kt**
+- [x] **2.10 Create src/main/kotlin/com/agentpulse/search/SearchIndexer.kt**
   ```kotlin
   package com.agentpulse.search
 
@@ -297,7 +297,7 @@
   }
   ```
 
-- [ ] **2.11 Create src/main/kotlin/com/agentpulse/search/NoopIndexer.kt**
+- [x] **2.11 Create src/main/kotlin/com/agentpulse/search/NoopIndexer.kt**
   ```kotlin
   package com.agentpulse.search
 
@@ -310,7 +310,7 @@
   }
   ```
 
-- [ ] **2.12 Create stub providers** — one file per agent type in `src/main/kotlin/com/agentpulse/provider/`
+- [x] **2.12 Create stub providers** — one file per agent type in `src/main/kotlin/com/agentpulse/provider/`
   Each stub returns a minimal `AgentState` from `reconcileAgentState()`.
   Example for CopilotCliProvider:
   ```kotlin
@@ -343,13 +343,13 @@
     - `CodexProvider` — `AgentType.CodexCli`
     - `GeminiProvider` — `AgentType.GeminiCli`
 
-- [ ] **2.13 Verify compilation**
+- [x] **2.13 Verify compilation**
   ```bash
   cd <project-root> && ./gradlew build
   ```
   Must compile with zero errors. Then `./gradlew run` — app should launch unchanged.
 
-- [ ] **2.14 Commit, push, and open PR**
+- [x] **2.14 Commit, push, and open PR**
   ```bash
   git checkout -b step-2-data-model
   git add -A && git commit -m "feat: data model, provider system, and state manager

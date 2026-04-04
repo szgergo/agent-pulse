@@ -49,7 +49,7 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
 
 ---
 
-- [ ] **3.0 Extend existing model files**
+- [x] **3.0 Extend existing model files**
 
   Step 2 is already merged. `HookEventWatcher` calls two methods that don't exist in the codebase yet — add them now, before creating `HookEventWatcher.kt`.
 
@@ -97,7 +97,7 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
 
   Run `./gradlew build` after this sub-task to confirm zero compile errors before moving to 3.1.
 
-- [ ] **3.1 Create HookEventWatcher.kt**
+- [x] **3.1 Create HookEventWatcher.kt**
 
   `src/main/kotlin/com/agentpulse/watcher/HookEventWatcher.kt`
 
@@ -340,7 +340,7 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   }
   ```
 
-- [ ] **3.2 Create HookDeployer.kt**
+- [x] **3.2 Create HookDeployer.kt**
 
   `src/main/kotlin/com/agentpulse/deploy/HookDeployer.kt`
 
@@ -456,7 +456,7 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   }
   ```
 
-- [ ] **3.3 Wire into Main.kt**
+- [x] **3.3 Wire into Main.kt**
   - **Do NOT modify the existing UI** (dummy agents, AgentCard, local `AgentStatus`/`Agent` types). The UI is replaced in Step 5. In this step, only add the watcher and deployer initialization alongside the existing code.
   - Note: `Main.kt` has a local `AgentStatus` enum and `Agent` data class from the scaffold. These will conflict with imports from the `model` package — use fully-qualified names or avoid importing `com.agentpulse.model.AgentStatus` in Main.kt for now. Step 5 removes the local types.
   - Create `AgentStateManager` with all stub providers from Step 2
@@ -506,7 +506,7 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   import com.agentpulse.provider.GeminiProvider
   ```
 
-- [ ] **3.4 Verify**
+- [x] **3.4 Verify**
   - Run `./gradlew run`
   - Terminal shows `[agent-pulse] Watching: ~/.agent-pulse/events/`
   - Manually create a test event file:
@@ -518,7 +518,7 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   - Verify `~/.agent-pulse/hooks/report.sh` exists and is executable
   - Verify `~/.agent-pulse/config.json` contains `"hooksDeployed": true`
 
-- [ ] **3.5 Commit, push, and open PR**
+- [x] **3.5 Commit, push, and open PR**
   ```bash
   git checkout -b step-3-watcher
   # ... implement, then:

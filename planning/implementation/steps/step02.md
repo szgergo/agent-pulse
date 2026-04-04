@@ -110,55 +110,55 @@
 
 - [ ] **2.5 Create src/main/kotlin/com/agentpulse/model/HookEventType.kt**
   Typed enum of all documented hook event types across all supported agents.
-  Use `fromRaw(String)` to map the raw filename token to a typed constant; falls back
-  to `Unknown` for unrecognised values.
+  Use `fromRaw(String)` to map the raw filename token to a typed constant via a
+  case-insensitive name match; falls back to `Unknown` for unrecognised values.
   ```kotlin
   package com.agentpulse.model
 
-  enum class HookEventType(val rawValue: String) {
+  enum class HookEventType {
       // Lifecycle — shared across Copilot CLI, Claude Code, Gemini CLI, Cursor
-      // (case-insensitive fromRaw handles both "sessionStart" and "SessionStart")
-      SessionStart("sessionStart"),
-      SessionEnd("sessionEnd"),
+      // (fromRaw is case-insensitive, so "sessionStart" and "SessionStart" both resolve here)
+      SessionStart,
+      SessionEnd,
       // Tool execution — Copilot CLI, Claude Code, Cursor
-      PreToolUse("preToolUse"),
-      PostToolUse("postToolUse"),
+      PreToolUse,
+      PostToolUse,
       // Agent completion — Copilot CLI, Claude Code, Cursor
-      Stop("stop"),
-      SubagentStop("subagentStop"),
+      Stop,
+      SubagentStop,
       // Context management — Claude Code, Cursor
-      PreCompact("preCompact"),
+      PreCompact,
       // Copilot CLI specific
-      UserPromptSubmitted("userPromptSubmitted"),
-      AgentStop("agentStop"),
-      ErrorOccurred("errorOccurred"),
+      UserPromptSubmitted,
+      AgentStop,
+      ErrorOccurred,
       // Claude Code specific
-      UserPromptSubmit("UserPromptSubmit"),
-      Notification("Notification"),
+      UserPromptSubmit,
+      Notification,
       // Gemini CLI specific
-      BeforeTool("BeforeTool"),
-      AfterTool("AfterTool"),
-      BeforeAgent("BeforeAgent"),
-      AfterAgent("AfterAgent"),
-      BeforeModel("BeforeModel"),
-      AfterModel("AfterModel"),
+      BeforeTool,
+      AfterTool,
+      BeforeAgent,
+      AfterAgent,
+      BeforeModel,
+      AfterModel,
       // Cursor specific
-      BeforeShellExecution("beforeShellExecution"),
-      AfterShellExecution("afterShellExecution"),
-      AfterFileEdit("afterFileEdit"),
-      BeforeSubmitPrompt("beforeSubmitPrompt"),
-      BeforeMcpExecution("beforeMCPExecution"),
-      AfterMcpExecution("afterMCPExecution"),
+      BeforeShellExecution,
+      AfterShellExecution,
+      AfterFileEdit,
+      BeforeSubmitPrompt,
+      BeforeMcpExecution,
+      AfterMcpExecution,
       // Codex CLI specific
-      Notify("notify"),
+      Notify,
       // Fallback
-      Unknown("unknown");
+      Unknown;
 
       companion object {
           private val index: Map<String, HookEventType> =
               entries
                   .filter { it != Unknown }
-                  .associate { type -> type.rawValue.lowercase() to type }
+                  .associate { it.name.lowercase() to it }
 
           fun fromRaw(raw: String): HookEventType = index[raw.lowercase()] ?: Unknown
       }

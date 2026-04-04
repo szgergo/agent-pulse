@@ -2,6 +2,7 @@ package com.agentpulse.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 /**
  * Typed hook event payload. Each agent has its own data class reflecting
@@ -10,6 +11,19 @@ import kotlinx.serialization.Serializable
 @Serializable
 sealed interface HookPayload {
     val cwd: String?
+
+    companion object {
+        private val json = Json { ignoreUnknownKeys = true }
+
+        fun fromRawPayload(agent: AgentType, rawJson: String): HookPayload = when (agent) {
+            AgentType.CopilotCli, AgentType.CopilotVsCode, AgentType.CopilotIntelliJ ->
+                json.decodeFromString<CopilotPayload>(rawJson)
+            AgentType.ClaudeCode -> json.decodeFromString<ClaudePayload>(rawJson)
+            AgentType.CursorIde -> json.decodeFromString<CursorPayload>(rawJson)
+            AgentType.CodexCli -> json.decodeFromString<CodexPayload>(rawJson)
+            AgentType.GeminiCli -> json.decodeFromString<GeminiPayload>(rawJson)
+        }
+    }
 }
 
 @Serializable

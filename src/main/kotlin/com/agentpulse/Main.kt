@@ -46,6 +46,14 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.agentpulse.agent_pulse.generated.resources.Res
 import com.agentpulse.agent_pulse.generated.resources.tray_icon
+import com.agentpulse.deploy.HookDeployer
+import com.agentpulse.provider.AgentStateManager
+import com.agentpulse.provider.ClaudeCodeProvider
+import com.agentpulse.provider.CodexProvider
+import com.agentpulse.provider.CopilotCliProvider
+import com.agentpulse.provider.CursorProvider
+import com.agentpulse.provider.GeminiProvider
+import com.agentpulse.watcher.HookEventWatcher
 import java.awt.GraphicsEnvironment
 import java.awt.MouseInfo
 import kotlinx.coroutines.delay
@@ -92,6 +100,30 @@ val dummyAgents = listOf(
 )
 
 fun main() = application {
+    // --- Step 3: Hook infrastructure ---
+    // NOTE: Providers and stateManager are created at application scope so they
+    // survive window open/close cycles in this system-tray app.
+    val providers = listOf(
+        CopilotCliProvider(),
+        ClaudeCodeProvider(),
+        CursorProvider(),
+        CodexProvider(),
+        GeminiProvider(),
+    )
+    val stateManager = AgentStateManager(providers)
+
+    // Deploy hook infrastructure on first run
+    HookDeployer().deployIfNeeded()
+
+    // Start event watcher — non-blocking, launches coroutines on its own IO scope.
+    // Must live at application level, NOT inside a LaunchedEffect or Window { } block.
+    val watcher = HookEventWatcher(stateManager)
+    watcher.start()
+
+    // Clean shutdown: cancel watcher's coroutines when the JVM exits
+    Runtime.getRuntime().addShutdownHook(Thread { watcher.stop() })
+
+    // stateManager.agents is available for Step 5 to observe
     var isVisible by remember { mutableStateOf(false) }
     var spinnerIndex by remember { mutableStateOf(0) }
     val popupWidthPx = 360

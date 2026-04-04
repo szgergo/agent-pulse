@@ -19,6 +19,7 @@
 **Files to create**:
 - `src/main/kotlin/com/agentpulse/watcher/HookEventWatcher.kt`
 - `src/main/kotlin/com/agentpulse/deploy/HookDeployer.kt`
+- `src/main/resources/hooks/report.sh` ← already committed; loaded from classpath at runtime
 
 **Files to modify**:
 - `src/main/kotlin/com/agentpulse/model/AgentType.kt`
@@ -400,19 +401,6 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
       private val eventsDir = baseDir.resolve("events")
       private val json = Json { prettyPrint = true; ignoreUnknownKeys = true }
 
-      private val reportShContent = """
-          |#!/bin/sh
-          |# MONITORING HOOK — MUST ALWAYS EXIT 0
-          |# A non-zero exit blocks agent Bash operations (hooks-observability #30).
-          |trap 'exit 0' ERR
-          |EVENTS_DIR="${'$'}HOME/.agent-pulse/events"
-          |mkdir -p "${'$'}EVENTS_DIR" || exit 0
-          |[ "${'$'}(find "${'$'}EVENTS_DIR" -name '*.json' -maxdepth 1 | head -1001 | wc -l)" -gt 1000 ] && exit 0
-          |T=${'$'}(mktemp "${'$'}EVENTS_DIR/.tmp.XXXXXX") || exit 0
-          |cat > "${'$'}T" || { rm -f "${'$'}T" 2>/dev/null; exit 0; }
-          |mv "${'$'}T" "${'$'}EVENTS_DIR/${'$'}(date +%s)-${'$'}2-${'$'}1-${'$'}PPID.json" || { rm -f "${'$'}T" 2>/dev/null; exit 0; }
-      """.trimMargin() + "\n"
-
       fun deployIfNeeded() {
           if (isDeployed()) return
           deploy()
@@ -432,7 +420,13 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
           Files.createDirectories(hooksDir)
           Files.createDirectories(eventsDir)
 
-          // Write report.sh
+          // Load report.sh from the bundled classpath resource (src/main/resources/hooks/report.sh).
+          // Using getResourceAsStream avoids Kotlin string escaping and keeps the script
+          // readable in git with proper syntax highlighting.
+          val reportShContent = HookDeployer::class.java.getResourceAsStream("/hooks/report.sh")
+              ?.bufferedReader()?.readText()
+              ?: throw IllegalStateException("Bundled resource /hooks/report.sh not found — packaging error")
+
           val reportSh = hooksDir.resolve("report.sh")
           reportSh.writeText(reportShContent)
           reportSh.toFile().setExecutable(true)

@@ -100,43 +100,16 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
 
       fun start() {
           Files.createDirectories(eventsDir)
-          // processExistingFiles runs on the IO scope (SupervisorJob + Dispatchers.IO)
-          scope.launch {
-              processExistingFiles()  // Recovery after restart
-          }
-          startWatching()
+          startWatchingWithRecovery()
           startPidValidation()
           println("[agent-pulse] Watching: $eventsDir")
       }
 
-      private fun processExistingFiles() {
-          // On startup, there may be many queued events (e.g., 200-300 files
-          // accumulated while agent-pulse was offline). We only care about the
-          // latest state per (agent, pid) — older events are stale.
-          // Group by (agent, pid), keep only the last file per group, delete the rest.
-          val processable = eventsDir.listDirectoryEntries()
-              .filter { it.isProcessableEvent() }
-              .sortedBy { it.name }  // Chronological — timestamp is first in filename
-
-          val grouped = processable.groupBy { file ->
-              val parts = file.nameWithoutExtension.split("-", limit = 4)
-              if (parts.size == 4) "${parts[1]}-${parts[3]}" else "unknown"  // "agent-pid"
-          }
-
-          for ((_, files) in grouped) {
-              // Delete all but the last (most recent) file in each group
-              val stale = files.dropLast(1)
-              stale.forEach { it.deleteIfExists() }
-              if (stale.isNotEmpty()) {
-                  println("[agent-pulse] Startup: skipped ${stale.size} stale events for group")
-              }
-              // Process only the latest event per (agent, pid)
-              files.lastOrNull()?.let { processFile(it) }
-          }
-      }
-
-      private fun startWatching() {
+      private fun startWatchingWithRecovery() {
           scope.launch {
+              // 1. Register WatchService FIRST — starts queuing events immediately.
+              //    This must happen before processExistingFiles so no events are missed
+              //    in the gap between the directory listing and the watch registration.
               val watchService = FileSystems.getDefault().newWatchService()
               eventsDir.register(
                   watchService,
@@ -144,6 +117,16 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
                   com.sun.nio.file.SensitivityWatchEventModifier.HIGH, // 100ms FSEvents latency on JBR
               )
 
+              // 2. Process existing files (recovery after restart).
+              //    WatchService is already registered, so new events arriving during this
+              //    scan are queued in the OS-level buffer (LinkedBlockingDeque on JBR)
+              //    and will be picked up by the take() loop below.
+              //    This DOES block the watch loop from starting, but events are NOT lost —
+              //    they accumulate in the WatchService buffer. Duplicates are safe because
+              //    processFile checks file.exists() before reading.
+              processExistingFiles()
+
+              // 3. Watch loop — processes new events going forward
               while (isActive) {
                   // take() blocks natively on JBR's LinkedBlockingDeque — zero CPU when idle
                   // On OpenJDK this would poll, but we always run on JBR
@@ -151,6 +134,11 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
                       watchService.take()
                   }
                   for (event in key.pollEvents()) {
+                      if (event.kind() == StandardWatchEventKinds.OVERFLOW) {
+                          // Buffer overflow — re-scan directory to catch anything missed
+                          processExistingFiles()
+                          continue
+                      }
                       val filename = event.context() as? Path ?: continue
                       val file = eventsDir.resolve(filename)
                       if (file.isProcessableEvent()) {
@@ -163,11 +151,20 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
       }
 
       private fun processFile(file: Path) {
-          // Called from IO scope (startWatching / processExistingFiles) — file reads are safe
+          // Called from IO scope (startWatchingWithRecovery) — file reads are safe
           try {
               if (!file.exists()) return
               val parts = file.nameWithoutExtension.split("-", limit = 4)
               if (parts.size != 4) return
+
+              // Guard: hook event files are ~225 bytes. Skip anything suspiciously large
+              // to avoid OOM if a rogue process writes to our events dir.
+              val fileSize = file.fileSize()
+              if (fileSize > 64 * 1024) {  // 64 KB — generous for a JSON hook event
+                  System.err.println("[agent-pulse] Skipping oversized event file (${fileSize} bytes): ${file.name}")
+                  file.deleteIfExists()
+                  return
+              }
 
               val (timestampStr, agentName, eventType, pidStr) = parts
               val agent = parseAgentType(agentName) ?: return
@@ -191,6 +188,30 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
               file.deleteIfExists()  // Cleanup after processing
           } catch (e: Exception) {
               System.err.println("[agent-pulse] Failed to process ${file.name}: ${e.message}")
+          }
+      }
+
+      private fun processExistingFiles() {
+          // On startup, there may be many queued events (e.g., 200-300 files
+          // accumulated while agent-pulse was offline). We only care about the
+          // latest state per (agent, pid) — older events are stale.
+          // Group by (agent, pid), keep only the last file per group, delete the rest.
+          val processable = eventsDir.listDirectoryEntries()
+              .filter { it.isProcessableEvent() }
+              .sortedBy { it.name }  // Chronological — timestamp is first in filename
+
+          val grouped = processable.groupBy { file ->
+              val parts = file.nameWithoutExtension.split("-", limit = 4)
+              if (parts.size == 4) "${parts[1]}-${parts[3]}" else "unknown"  // "agent-pid"
+          }
+
+          for ((_, files) in grouped) {
+              val stale = files.dropLast(1)
+              stale.forEach { it.deleteIfExists() }
+              if (stale.isNotEmpty()) {
+                  println("[agent-pulse] Startup: skipped ${stale.size} stale events for group")
+              }
+              files.lastOrNull()?.let { processFile(it) }
           }
       }
 

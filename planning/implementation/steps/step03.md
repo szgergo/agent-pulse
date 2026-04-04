@@ -166,9 +166,12 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
       }
 
       private fun processFile(file: Path) {
-          // Called from IO scope (startWatchingWithRecovery) — file reads are safe
+          // Called from IO scope (startWatchingWithRecovery) — file reads are safe.
+          // IMPORTANT: file MUST be deleted in the finally block regardless of success/failure.
+          // Without this, a malformed or poison file would remain on disk and be re-processed
+          // on every restart, causing an infinite error loop.
+          if (!file.exists()) return
           try {
-              if (!file.exists()) return
               val parts = file.nameWithoutExtension.split("-", limit = 4)
               if (parts.size != 4) return
 
@@ -177,7 +180,6 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
               val fileSize = file.fileSize()
               if (fileSize > 64 * 1024) {  // 64 KB — generous for a JSON hook event
                   System.err.println("[agent-pulse] Skipping oversized event file (${fileSize} bytes): ${file.name}")
-                  file.deleteIfExists()
                   return
               }
 
@@ -199,10 +201,10 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
 
               stateManager.onEvent(hookEvent)
               println("[agent-pulse] Event: $agentName/$eventType (PID $pid)")
-
-              file.deleteIfExists()  // Cleanup after processing
           } catch (e: Exception) {
               System.err.println("[agent-pulse] Failed to process ${file.name}: ${e.message}")
+          } finally {
+              file.deleteIfExists()
           }
       }
 

@@ -374,6 +374,11 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   > state: 2-3 files in flight). Users should disable hooks if permanently uninstalling
   > agent-pulse.
 
+  > **Windows / PowerShell**: `report.sh` is POSIX-only. All 5 target agents primarily run
+  > on macOS/Linux; Windows users typically use WSL or Git Bash where `.sh` runs natively.
+  > If a provider later needs native Windows hook support (e.g. Cursor), add a `report.ps1`
+  > in that provider's step — not here. Shared infra stays POSIX-only for MVP.
+
   ```kotlin
   package com.agentpulse.deploy
 

@@ -49,7 +49,9 @@ class HookDeployer(
 
         val reportSh = hooksDir.resolve("report.sh")
         reportSh.writeText(reportShContent)
-        reportSh.toFile().setExecutable(true)
+        if (!reportSh.toFile().setExecutable(true)) {
+            System.err.println("[agent-pulse] Failed to set report.sh executable — hooks may not fire")
+        }
 
         // Mark as deployed
         val config = if (configFile.exists()) {

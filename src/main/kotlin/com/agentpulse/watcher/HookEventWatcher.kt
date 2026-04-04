@@ -61,7 +61,6 @@ class HookEventWatcher(
             eventsDir.register(
                 watchService,
                 arrayOf(StandardWatchEventKinds.ENTRY_CREATE),
-                com.sun.nio.file.SensitivityWatchEventModifier.HIGH, // 100ms FSEvents latency on JBR
             )
             println("[agent-pulse] Watching: $eventsDir")
 

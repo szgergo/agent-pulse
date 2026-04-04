@@ -460,7 +460,8 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   - Note: `Main.kt` has a local `AgentStatus` enum and `Agent` data class from the scaffold. These will conflict with imports from the `model` package — use fully-qualified names or avoid importing `com.agentpulse.model.AgentStatus` in Main.kt for now. Step 5 removes the local types.
   - Create `AgentStateManager` with all stub providers from Step 2
   - Create `HookDeployer()` — call `deployIfNeeded()` on first launch
-  - Create `HookEventWatcher(stateManager)` — call `start()` in a `LaunchedEffect`
+  - Create `HookEventWatcher(stateManager)` — call `start()` in `main()` before the `application` block (not inside a `LaunchedEffect` — the watcher has its own `CoroutineScope` and must survive window open/close cycles in this system-tray app)
+  - Add a JVM shutdown hook to call `watcher.stop()` for clean cancellation on quit
   - Pass `stateManager.agents` to UI (for Step 5)
 
   Key wiring in `Main.kt` (add near the top of the `main()` function, before the `application` block):
@@ -478,13 +479,17 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   // Deploy hook infrastructure on first run
   HookDeployer().deployIfNeeded()
 
-  // Start event watcher
+  // Start event watcher — non-blocking, launches coroutines on its own IO scope.
+  // Must live at main() level, NOT inside a LaunchedEffect or Window { } block.
+  // This is a system-tray app (LSUIElement=true) — the window opens and closes
+  // while the app keeps running. Tying the watcher to a window-level scope
+  // would stop it when the dashboard is closed.
   val watcher = HookEventWatcher(stateManager)
+  watcher.start()
 
-  // Inside Compose `application { }`, add a LaunchedEffect:
-  LaunchedEffect(Unit) {
-      watcher.start()
-  }
+  // Clean shutdown: cancel watcher's coroutines when the JVM exits
+  // (tray "Quit", Ctrl+C, SIGTERM, etc.)
+  Runtime.getRuntime().addShutdownHook(Thread { watcher.stop() })
 
   // stateManager.agents is available for Step 5 to observe
   ```
@@ -523,7 +528,7 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   - No polling, no debounce — FSEvents coalesces at kernel level
   - Filename parsing: <timestamp>-<agent>-<eventType>-<ppid>.json
   - Startup recovery: group by (agent, pid), process only latest, delete stale
-  - PID validation every 30s with synthetic sessionEnd
+  - PID validation every 5s with synthetic sessionEnd
   - .tmp. file exclusion, cleanup after processing
   - HookDeployer: report.sh with self-cleaning 1000-file cap (~4 MB max)
   - Deployment state tracked in ~/.agent-pulse/config.json

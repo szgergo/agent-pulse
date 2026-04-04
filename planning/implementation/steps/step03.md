@@ -228,8 +228,8 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
           // on every restart, causing an infinite error loop.
           if (!file.exists()) return
           try {
-              val parts = file.nameWithoutExtension.split("-", limit = 4)
-              if (parts.size != 4) return
+              val allParts = file.nameWithoutExtension.split("-")
+              if (allParts.size < 4) return
 
               // Guard: hook event files are ~225 bytes. Skip anything suspiciously large
               // to avoid OOM if a rogue process writes to our events dir.
@@ -239,7 +239,10 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
                   return
               }
 
-              val (timestampStr, agentName, eventType, pidStr) = parts
+              val timestampStr = allParts.first()
+              val pidStr = allParts.last()
+              val eventType = allParts[allParts.size - 2]
+              val agentName = allParts.subList(1, allParts.size - 2).joinToString("-")
               val agent = AgentType.forName(agentName) ?: return
               val pid = pidStr.toIntOrNull() ?: return
               val epochSeconds = timestampStr.toLongOrNull() ?: return
@@ -274,8 +277,12 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
               .sortedBy { it.name }  // Chronological — timestamp is first in filename
 
           val grouped = processable.groupBy { file ->
-              val parts = file.nameWithoutExtension.split("-", limit = 4)
-              if (parts.size == 4) "${parts[1]}-${parts[3]}" else "unknown"  // "agent-pid"
+              val allParts = file.nameWithoutExtension.split("-")
+              if (allParts.size >= 4) {
+                  val agentName = allParts.subList(1, allParts.size - 2).joinToString("-")
+                  val pid = allParts.last()
+                  "$agentName-$pid"  // e.g. "copilot-cli-12345"
+              } else "unknown"
           }
 
           for ((_, files) in grouped) {

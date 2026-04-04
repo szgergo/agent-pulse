@@ -316,7 +316,10 @@
   ```kotlin
   package com.agentpulse.provider
 
-  import com.agentpulse.model.*
+  import com.agentpulse.model.AgentState
+  import com.agentpulse.model.AgentStatus
+  import com.agentpulse.model.AgentType
+  import com.agentpulse.model.HookEvent
 
   class CopilotCliProvider : AgentProvider {
       override val agentType = AgentType.CopilotCli

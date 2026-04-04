@@ -82,11 +82,26 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   import com.agentpulse.model.CodexPayload
   import com.agentpulse.model.GeminiPayload
   import com.agentpulse.provider.AgentStateManager
-  import kotlinx.coroutines.*
+  import kotlinx.coroutines.CoroutineScope
+  import kotlinx.coroutines.Dispatchers
+  import kotlinx.coroutines.SupervisorJob
+  import kotlinx.coroutines.delay
+  import kotlinx.coroutines.isActive
+  import kotlinx.coroutines.launch
+  import kotlinx.coroutines.runInterruptible
   import kotlinx.serialization.json.Json
-  import java.nio.file.*
+  import java.nio.file.FileSystems
+  import java.nio.file.Files
+  import java.nio.file.Path
+  import java.nio.file.StandardWatchEventKinds
   import java.time.Instant
-  import kotlin.io.path.*
+  import kotlin.io.path.deleteIfExists
+  import kotlin.io.path.exists
+  import kotlin.io.path.fileSize
+  import kotlin.io.path.listDirectoryEntries
+  import kotlin.io.path.name
+  import kotlin.io.path.nameWithoutExtension
+  import kotlin.io.path.readText
 
   class HookEventWatcher(
       private val stateManager: AgentStateManager,
@@ -318,10 +333,15 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   ```kotlin
   package com.agentpulse.deploy
 
-  import kotlinx.serialization.json.*
+  import kotlinx.serialization.json.Json
+  import kotlinx.serialization.json.JsonObject
+  import kotlinx.serialization.json.JsonPrimitive
+  import kotlinx.serialization.json.booleanOrNull
   import java.nio.file.Files
   import java.nio.file.Path
-  import kotlin.io.path.*
+  import kotlin.io.path.exists
+  import kotlin.io.path.readText
+  import kotlin.io.path.writeText
 
   class HookDeployer(
       private val baseDir: Path = Path.of(System.getProperty("user.home"), ".agent-pulse"),
@@ -424,7 +444,11 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   import com.agentpulse.deploy.HookDeployer
   import com.agentpulse.watcher.HookEventWatcher
   import com.agentpulse.provider.AgentStateManager
-  import com.agentpulse.provider.*  // All provider implementations
+  import com.agentpulse.provider.CopilotCliProvider
+  import com.agentpulse.provider.ClaudeCodeProvider
+  import com.agentpulse.provider.CursorProvider
+  import com.agentpulse.provider.CodexProvider
+  import com.agentpulse.provider.GeminiProvider
   ```
 
 - [ ] **3.4 Verify**

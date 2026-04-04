@@ -145,10 +145,12 @@ class HookEventWatcher(
             .filter { it.isProcessableEvent() }
             .sortedBy { it.name }  // Chronological — timestamp is first in filename
 
-        val grouped = processable.groupBy { file ->
-            val parts = file.nameWithoutExtension.split("-", limit = 4)
-            if (parts.size == 4) "${parts[1]}-${parts[3]}" else "unknown"  // "agent-pid"
-        }
+        val grouped = processable
+            .filter { file -> file.nameWithoutExtension.split("-", limit = 4).size == 4 }
+            .groupBy { file ->
+                val parts = file.nameWithoutExtension.split("-", limit = 4)
+                "${parts[1]}-${parts[3]}"  // "agent-pid"
+            }
 
         for ((_, files) in grouped) {
             val stale = files.dropLast(1)

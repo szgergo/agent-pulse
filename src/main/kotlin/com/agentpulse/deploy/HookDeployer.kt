@@ -30,7 +30,10 @@ class HookDeployer(
             config["hooksDeployed"]?.let {
                 (it as? JsonPrimitive)?.booleanOrNull == true
             } ?: false
-        } catch (e: Exception) { false }
+        } catch (e: Exception) {
+            System.err.println("[agent-pulse] Failed to read config file, assuming not deployed: ${e.message}")
+            false
+        }
     }
 
     private fun deploy() {
@@ -51,7 +54,10 @@ class HookDeployer(
         // Mark as deployed
         val config = if (configFile.exists()) {
             try { json.decodeFromString<JsonObject>(configFile.readText()) }
-            catch (e: Exception) { JsonObject(emptyMap()) }
+            catch (e: Exception) {
+                System.err.println("[agent-pulse] Config file is malformed, resetting: ${e.message}")
+                JsonObject(emptyMap())
+            }
         } else {
             JsonObject(emptyMap())
         }

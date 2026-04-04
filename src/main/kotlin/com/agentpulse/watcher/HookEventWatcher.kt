@@ -101,8 +101,8 @@ class HookEventWatcher(
         // on every restart, causing an infinite error loop.
         if (!file.exists()) return
         try {
-            val parts = file.nameWithoutExtension.split("-", limit = 4)
-            if (parts.size != 4) return
+            val allParts = file.nameWithoutExtension.split("-")
+            if (allParts.size < 4) return
 
             // Guard: hook event files are ~225 bytes. Skip anything suspiciously large
             // to avoid OOM if a rogue process writes to our events dir.
@@ -112,7 +112,10 @@ class HookEventWatcher(
                 return
             }
 
-            val (timestampStr, agentName, eventType, pidStr) = parts
+            val timestampStr = allParts.first()
+            val pidStr = allParts.last()
+            val eventType = allParts[allParts.size - 2]
+            val agentName = allParts.subList(1, allParts.size - 2).joinToString("-")
             val agent = AgentType.forName(agentName) ?: return
             val pid = pidStr.toIntOrNull() ?: return
             val epochSeconds = timestampStr.toLongOrNull() ?: return
@@ -146,10 +149,12 @@ class HookEventWatcher(
             .sortedBy { it.name }  // Chronological — timestamp is first in filename
 
         val grouped = processable
-            .filter { file -> file.nameWithoutExtension.split("-", limit = 4).size == 4 }
+            .filter { file -> file.nameWithoutExtension.split("-").size >= 4 }
             .groupBy { file ->
-                val parts = file.nameWithoutExtension.split("-", limit = 4)
-                "${parts[1]}-${parts[3]}"  // "agent-pid"
+                val allParts = file.nameWithoutExtension.split("-")
+                val agentName = allParts.subList(1, allParts.size - 2).joinToString("-")
+                val pid = allParts.last()
+                "$agentName-$pid"  // e.g. "copilot-cli-12345"
             }
 
         for ((_, files) in grouped) {

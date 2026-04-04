@@ -17,7 +17,16 @@
 ---
 
 - [ ] **6.1 Deploy Claude Code hook config**
-    - Read existing `~/.claude/settings.json` (may contain permissions, allowedTools, etc.)
+    - **Resolve config directory**: Check `CLAUDE_CONFIG_DIR` env var first, fall back to `~/.claude/`.
+      Use the `agentConfigDir()` helper from shared-context.md:
+      ```kotlin
+      val claudeDir = agentConfigDir("CLAUDE_CONFIG_DIR", ".claude")
+      val settingsFile = claudeDir.resolve("settings.json")
+      ```
+      > ⚠️ Without this check, 78% of Claude sessions are invisible when `CLAUDE_CONFIG_DIR` is set.
+      > See [agentlytics #38](https://github.com/kamilstanuch/agentlytics/issues/38) and
+      > shared-context.md "Agent Config Directory Env Var Overrides".
+    - Read existing `settings.json` from the resolved path (may contain permissions, allowedTools, etc.)
     - Merge a `hooks` section into it — add agent-pulse entries without removing any existing hooks
     - Write the merged file back
     - If the file doesn't exist, create it with only the hooks section
@@ -35,6 +44,11 @@
       }
       ```
     - We only use `PostToolUse` — not `PreToolUse`, to avoid interfering with Claude Code's tool authorization flow
+    - **Future expansion note**: Claude Code supports 12 hook event types (SessionStart, SessionEnd,
+      SubagentStart, SubagentEnd, Stop, PreToolUse, PostToolUse, Notification, etc.). For MVP we only
+      hook PostToolUse. Post-MVP can add SessionStart/SessionEnd for richer lifecycle data.
+    - **Stop hook caveat**: If a Stop hook invokes the CLI again, it creates an infinite loop. Guard with
+      `STOP_HOOK_ACTIVE` env var if Stop hooks are ever added post-MVP.
     - Add this logic to `HookDeployer.deployClaudeCodeHooks()`:
       1. Parse existing JSON (or start with empty `JsonObject`)
       2. Get or create `hooks` object

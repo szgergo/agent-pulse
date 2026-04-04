@@ -5,6 +5,8 @@
 > Path: `planning/implementation/shared-context.md`
 >
 > 📚 **Further reading**: Hook safety analysis, delivery mechanism comparison, and per-agent hook schemas in [`research/agent-research.md`](../../research/agent-research.md)
+>
+> 🔬 **JBR WatchService research**: Deep analysis of JBR's native FSEvents WatchService vs OpenJDK polling vs IntelliJ fsnotifier in [`research/jbr-watchservice-research.md`](../../research/jbr-watchservice-research.md)
 
 ---
 
@@ -29,6 +31,17 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   → Routes to provider → updates StateFlow → UI reacts
 ```
 
+> **⚠️ JBR WatchService — critical implementation notes** (see [`research/jbr-watchservice-research.md`](../../research/jbr-watchservice-research.md)):
+>
+> JBR replaces OpenJDK's `PollingWatchService` with a native `MacOSXWatchService` backed by macOS FSEvents via JNI. This is the **default** — no system properties needed. The escape hatch `-Dwatch.service.polling=true` would downgrade to polling (never use this).
+>
+> Three rules for correct JBR WatchService usage:
+> 1. **Use `take()` not `poll()`** — `take()` blocks on a `LinkedBlockingDeque` with zero CPU. `poll()` causes unnecessary thread wakeups.
+> 2. **Use `SensitivityWatchEventModifier.HIGH`** — sets FSEvents latency to 100ms (default MEDIUM = 500ms).
+> 3. **No debounce needed** — FSEvents already coalesces events at the kernel level. Adding `delay()` just adds latency.
+>
+> Source: [JBR `BsdFileSystem.java`](https://github.com/JetBrains/JetBrainsRuntime/blob/b0b9c793dfe51ab56cf02131350de7e4c349539c/src/java.base/macosx/classes/sun/nio/fs/BsdFileSystem.java), [JBR `MacOSXWatchService.java`](https://github.com/JetBrains/JetBrainsRuntime/blob/b0b9c793dfe51ab56cf02131350de7e4c349539c/src/java.base/macosx/classes/sun/nio/fs/MacOSXWatchService.java)
+
 ---
 
 - [ ] **3.1 Create HookEventWatcher.kt**
@@ -36,16 +49,20 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   `src/main/kotlin/com/agentpulse/watcher/HookEventWatcher.kt`
 
   Responsibilities:
-  - Uses `java.nio.file.WatchService` (JBR = native FSEvents on macOS)
-  - Watches `~/.agent-pulse/events/` for `ENTRY_CREATE`
+  - Uses `java.nio.file.WatchService` (JBR = native FSEvents on macOS, zero-config default — see [research](../../research/jbr-watchservice-research.md))
+  - Watches `~/.agent-pulse/events/` for `ENTRY_CREATE` with `SensitivityWatchEventModifier.HIGH` (100ms FSEvents latency)
+  - Uses blocking `take()` (not `poll()`) — blocks natively on `LinkedBlockingDeque`, zero CPU when idle
+  - Wrapped in `runInterruptible(Dispatchers.IO)` for clean coroutine cancellation
+  - No debounce needed — FSEvents coalesces events at kernel level
   - On new file: parse filename `<timestamp>-<agent>-<eventType>-<ppid>.json`
   - Read file content and deserialize to typed `HookPayload` via `kotlinx.serialization.json.Json`
   - Create `HookEvent(agent, eventType, pid, timestamp, payload)`
   - Call `AgentStateManager.onEvent(event)`
   - Delete processed file (cleanup)
   - Ignore files starting with `.tmp.` (still being written by `report.sh`'s atomic rename pattern)
-  - Debounce: collapse events within 200ms window
   - Startup scan: on launch, process any existing files in `events/` dir (recovery after restart)
+    - Groups files by `(agent, pid)`, keeps only the latest file per group, deletes stale ones
+    - Prevents processing hundreds of stale events accumulated while agent-pulse was offline
   - Periodic PID validation: every 30s, check if PIDs of Running agents are still alive via `ProcessHandle.of(pid).isPresent`; if dead, fire synthetic `sessionEnd` event
   - Log: `[agent-pulse] Watching: ~/.agent-pulse/events/`
   - Log: `[agent-pulse] Event: <agent>/<eventType> (PID <pid>)`
@@ -74,6 +91,9 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   ) {
       private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+      private fun Path.isProcessableEvent(): Boolean =
+          name.endsWith(".json") && !name.startsWith(".tmp.")
+
       fun start() {
           Files.createDirectories(eventsDir)
           processExistingFiles()  // Recovery after restart
@@ -83,31 +103,54 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
       }
 
       private fun processExistingFiles() {
-          eventsDir.listDirectoryEntries("*.json")
-              .filter { !it.name.startsWith(".tmp.") }
-              .sortedBy { it.name }
-              .forEach { processFile(it) }
+          // On startup, there may be many queued events (e.g., 200-300 files
+          // accumulated while agent-pulse was offline). We only care about the
+          // latest state per (agent, pid) — older events are stale.
+          // Group by (agent, pid), keep only the last file per group, delete the rest.
+          val processable = eventsDir.listDirectoryEntries()
+              .filter { it.isProcessableEvent() }
+              .sortedBy { it.name }  // Chronological — timestamp is first in filename
+
+          val grouped = processable.groupBy { file ->
+              val parts = file.nameWithoutExtension.split("-", limit = 4)
+              if (parts.size == 4) "${parts[1]}-${parts[3]}" else "unknown"  // "agent-pid"
+          }
+
+          for ((_, files) in grouped) {
+              // Delete all but the last (most recent) file in each group
+              val stale = files.dropLast(1)
+              stale.forEach { it.deleteIfExists() }
+              if (stale.isNotEmpty()) {
+                  println("[agent-pulse] Startup: skipped ${stale.size} stale events for group")
+              }
+              // Process only the latest event per (agent, pid)
+              files.lastOrNull()?.let { processFile(it) }
+          }
       }
 
       private fun startWatching() {
           scope.launch {
               val watchService = FileSystems.getDefault().newWatchService()
-              eventsDir.register(watchService, StandardWatchEventKinds.ENTRY_CREATE)
+              eventsDir.register(
+                  watchService,
+                  arrayOf(StandardWatchEventKinds.ENTRY_CREATE),
+                  com.sun.nio.file.SensitivityWatchEventModifier.HIGH, // 100ms FSEvents latency on JBR
+              )
 
               while (isActive) {
-                  val key = watchService.poll(200, java.util.concurrent.TimeUnit.MILLISECONDS)
-                  if (key != null) {
-                      // Debounce: collect events within 200ms window
-                      delay(200)
-                      for (event in key.pollEvents()) {
-                          val filename = event.context() as? Path ?: continue
-                          val file = eventsDir.resolve(filename)
-                          if (file.name.endsWith(".json") && !file.name.startsWith(".tmp.")) {
-                              processFile(file)
-                          }
-                      }
-                      key.reset()
+                  // take() blocks natively on JBR's LinkedBlockingDeque — zero CPU when idle
+                  // On OpenJDK this would poll, but we always run on JBR
+                  val key = kotlinx.coroutines.runInterruptible(Dispatchers.IO) {
+                      watchService.take()
                   }
+                  for (event in key.pollEvents()) {
+                      val filename = event.context() as? Path ?: continue
+                      val file = eventsDir.resolve(filename)
+                      if (file.isProcessableEvent()) {
+                          processFile(file)
+                      }
+                  }
+                  key.reset()
               }
           }
       }
@@ -218,13 +261,31 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   The `report.sh` script (~30ms, zero deps, POSIX shell):
   ```sh
   #!/bin/sh
-  mkdir -p "$HOME/.agent-pulse/events"
-  T=$(mktemp "$HOME/.agent-pulse/events/.tmp.XXXXXX")
-  cat > "$T"
-  mv "$T" "$HOME/.agent-pulse/events/$(date +%s)-$2-$1-$PPID.json"
+  # MONITORING HOOK — MUST ALWAYS EXIT 0
+  # A non-zero exit blocks agent Bash operations (hooks-observability #30).
+  # Never use `set -e`. Every command guarded with `|| true` / `|| exit 0`.
+  trap 'exit 0' ERR
+  EVENTS_DIR="$HOME/.agent-pulse/events"
+  mkdir -p "$EVENTS_DIR" || exit 0
+  [ "$(find "$EVENTS_DIR" -name '*.json' -maxdepth 1 | head -1001 | wc -l)" -gt 1000 ] && exit 0
+  T=$(mktemp "$EVENTS_DIR/.tmp.XXXXXX") || exit 0
+  cat > "$T" || { rm -f "$T" 2>/dev/null; exit 0; }
+  mv "$T" "$EVENTS_DIR/$(date +%s)-$2-$1-$PPID.json" || { rm -f "$T" 2>/dev/null; exit 0; }
   ```
   Arguments: `$1` = event_type, `$2` = agent_name. Stdin = JSON payload.
   Uses atomic `mktemp` + `mv` so the watcher never reads a half-written file.
+  
+  > **⚠️ Hook exit code safety**: `trap 'exit 0' ERR` ensures the script ALWAYS exits 0, even on
+  > unexpected failures. This is CRITICAL — a monitoring hook that exits non-zero blocks ALL agent
+  > Bash operations. See [hooks-observability #30](https://github.com/nicobailey/hooks-observability/issues/30)
+  > and shared-context.md "Lessons from Competitor Research" for full details.
+
+  > **Disk space safety**: Each event file is ~225 bytes of content but occupies one 4 KB
+  > APFS block. The 1000-file cap limits worst-case accumulation to ~4 MB. At normal usage
+  > (~708 events/day), the cap is hit after ~1.4 days of agent-pulse being offline.
+  > When agent-pulse IS running, events are processed and deleted within ~100ms (steady
+  > state: 2-3 files in flight). Users should disable hooks if permanently uninstalling
+  > agent-pulse.
 
   ```kotlin
   package com.agentpulse.deploy
@@ -244,10 +305,15 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
 
       private val reportShContent = """
           |#!/bin/sh
-          |mkdir -p "${'$'}HOME/.agent-pulse/events"
-          |T=${'$'}(mktemp "${'$'}HOME/.agent-pulse/events/.tmp.XXXXXX")
-          |cat > "${'$'}T"
-          |mv "${'$'}T" "${'$'}HOME/.agent-pulse/events/${'$'}(date +%s)-${'$'}2-${'$'}1-${'$'}PPID.json"
+          |# MONITORING HOOK — MUST ALWAYS EXIT 0
+          |# A non-zero exit blocks agent Bash operations (hooks-observability #30).
+          |trap 'exit 0' ERR
+          |EVENTS_DIR="${'$'}HOME/.agent-pulse/events"
+          |mkdir -p "${'$'}EVENTS_DIR" || exit 0
+          |[ "${'$'}(find "${'$'}EVENTS_DIR" -name '*.json' -maxdepth 1 | head -1001 | wc -l)" -gt 1000 ] && exit 0
+          |T=${'$'}(mktemp "${'$'}EVENTS_DIR/.tmp.XXXXXX") || exit 0
+          |cat > "${'$'}T" || { rm -f "${'$'}T" 2>/dev/null; exit 0; }
+          |mv "${'$'}T" "${'$'}EVENTS_DIR/${'$'}(date +%s)-${'$'}2-${'$'}1-${'$'}PPID.json" || { rm -f "${'$'}T" 2>/dev/null; exit 0; }
       """.trimMargin() + "\n"
 
       fun deployIfNeeded() {
@@ -341,12 +407,14 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   # ... implement, then:
   git add -A && git commit -m "feat: hook event watcher and deployer
 
-  - HookEventWatcher: JBR WatchService on ~/.agent-pulse/events/
+  - HookEventWatcher: JBR native FSEvents WatchService on ~/.agent-pulse/events/
+  - Uses take() (blocking, zero CPU) + SensitivityWatchEventModifier.HIGH (100ms)
+  - No polling, no debounce — FSEvents coalesces at kernel level
   - Filename parsing: <timestamp>-<agent>-<eventType>-<ppid>.json
-  - Startup recovery scan for existing event files
+  - Startup recovery: group by (agent, pid), process only latest, delete stale
   - PID validation every 30s with synthetic sessionEnd
-  - 200ms debounce, .tmp. file exclusion, cleanup after processing
-  - HookDeployer: report.sh creation and events directory setup
+  - .tmp. file exclusion, cleanup after processing
+  - HookDeployer: report.sh with self-cleaning 1000-file cap (~4 MB max)
   - Deployment state tracked in ~/.agent-pulse/config.json
   - Wired into Main.kt with AgentStateManager
 

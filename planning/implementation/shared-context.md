@@ -29,7 +29,7 @@ This is a non-negotiable safety constraint that applies to every layer of the ap
 | **Process info** | NEVER signal, kill, or modify agent processes | OSHI read-only: `getProcesses()`, `getProcess()` only. No `kill()`, no signals |
 | **File watching** | Watch ONLY — never create/modify/delete watched files | `WatchService.register()` with event kinds, never `Files.write()` on watched paths |
 | **OTLP receiver** | RECEIVE data only — never push data to agents | Passive listener on localhost; agents push to us, we never push to them |
-| **Agent config** | NEVER modify agent configuration files | Read `config.json`, `settings.json`, etc. but never write to them |
+| **Agent config** | NEVER modify agent configuration files | Read `config.json`, `settings.json`, etc. but never write to them. Always resolve config dir via env var overrides (see "Lessons from Competitor Research" below) |
 
 **MVP relevance:** For the hooks+FileWatch MVP, the primary safety concerns are File system reading (hook event files in `~/.agent-pulse/events/`) and File watching. The SQLite, OSHI, and OTLP rules apply when implementing the post-MVP enrichment layer.
 
@@ -303,9 +303,9 @@ Implementation agents use **`claude-haiku-4.5`** — fast and cheap. The detaile
 | **Language** | Kotlin/JVM | Single language for entire app, strong typing, coroutines |
 | **UI Framework** | Compose for Desktop (Material 3) | Declarative UI, JetBrains-maintained, reactive state |
 | **Runtime** | JetBrains Runtime (JBR) 25 LTS | Native FSEvents WatchService on macOS (see `research-alternative.md`) |
-| **File Watching** | `java.nio.file.WatchService` (JBR) | Native FSEvents on macOS via JBR, ~100ms latency |
+| **File Watching** | `java.nio.file.WatchService` (JBR) | Native FSEvents on macOS via JBR (default, zero-config). Use `take()` + `SensitivityWatchEventModifier.HIGH` for 100ms latency, zero CPU |
 | **JSON** | kotlinx-serialization-json | Kotlin-native, fast, compile-time safe |
-| **Coroutines** | kotlinx-coroutines | Background FileWatch, debouncing, state flow |
+| **Coroutines** | kotlinx-coroutines | Background FileWatch (`runInterruptible` + `take()`), state flow |
 | **Global Hotkey** | [JNA](https://github.com/java-native-access/jna) 5.x + Carbon (macOS) | Same approach as JetBrains Toolbox — native `RegisterEventHotKey` via JNA |
 | **Shortcut Conflicts** | [JBR API](https://jetbrains.github.io/JetBrainsRuntimeApi/) `SystemShortcuts` | Query existing OS shortcuts to avoid conflicts (JBR-specific) |
 | **System Tray** | Compose `Tray` composable | Built-in tray support in Compose Desktop |
@@ -433,6 +433,8 @@ Branch naming: `step-1-scaffold`, `step-2-data-model`, `step-3-detection`, `step
 │  ┌─ HookEventWatcher ───────────────────────────────────────────────┐ │
 │  │  FileWatcher (JBR WatchService / native FSEvents)                │ │
 │  │  └─ ~/.agent-pulse/events/                                       │ │
+│  │     On startup: group queued files by (agent, pid), process      │ │
+│  │                 only latest per group, delete stale ones          │ │
 │  │     On ENTRY_CREATE:                                              │ │
 │  │       Parse filename → agent, event, PID, timestamp               │ │
 │  │       Read file → raw event JSON                                  │ │
@@ -443,6 +445,7 @@ Branch naming: `step-1-scaffold`, `step-2-data-model`, `step-3-detection`, `step
 │                                                                       │
 │  ┌─ Hook Deployer ──────────────────────────────────────────────────┐ │
 │  │  First-run: detect agents, deploy hook configs, create report.sh │ │
+│  │  report.sh: self-cleaning guard (1000-file cap, ~4 MB max)       │ │
 │  └───────────────────────────────────────────────────────────────────┘ │
 │                                                                       │
 │  ┌─ Search Indexer ─────────────────────────────────────────────────┐ │
@@ -573,13 +576,19 @@ This plan is informed by extensive research documented in companion files:
 |---|---|---|
 | `research-alternative.md` | Tech stack decision: why JBR over Tauri/Rust/FFM | 258 |
 | `agent-research.md` | Agent hooks, safety analysis, delivery architecture, per-agent analysis | ~1,800 |
+| `jbr-watchservice-research.md` | JBR native FSEvents WatchService vs OpenJDK polling vs IntelliJ fsnotifier — architecture, source analysis, correct usage | ~450 |
+| `format-stability-research.md` | Schema evolution evidence, defensive parsing strategies, ignoreUnknownKeys rationale | ~700 |
+| `competitor-deep-dive.md` | Analysis of 15+ competing tools — pitfalls, action items, anti-patterns (local only, gitignored) | ~1,200 |
+| `competitive-landscape.md` | Market positioning vs Agentic Radar, ccboard, Tome, et al. | ~200 |
 
 Key research findings that shaped this plan:
 1. **Hooks are a stable API** — agents maintain hook schemas. File paths are internal details with no API contract.
 2. **Hook safety** — hooks are synchronous/blocking in most agents. Disk-only design (~30ms) avoids all blocking risks.
 3. **Delivery comparison** — disk + FileWatch is the only durable, zero-dependency, zero-risk approach.
-4. **JBR FileWatch** — OpenJDK polls (2-10s) on macOS; JBR uses native FSEvents (~100-500ms).
+4. **JBR FileWatch** — OpenJDK uses `PollingWatchService` (stat-based, 2-10s) on macOS; JBR replaces it with native `MacOSXWatchService` backed by FSEvents via JNI (default, zero-config). Use `take()` (zero CPU) + `SensitivityWatchEventModifier.HIGH` (100ms). See [`jbr-watchservice-research.md`](../research/jbr-watchservice-research.md).
 5. **Read-only principle** — agent-pulse reads agent data, never writes (except one-time hook deployment with consent).
+6. **Format stability** — all observed schema changes across agents are additive-only (new fields added, existing never removed). `ignoreUnknownKeys = true` handles this automatically. See [`format-stability-research.md`](../research/format-stability-research.md).
+7. **Competitor pitfalls** — 15+ tools analyzed, critical lessons documented in [`competitor-deep-dive.md`](../research/competitor-deep-dive.md). See "Lessons from Competitor Research" section below.
 
 ---
 
@@ -597,3 +606,101 @@ Key research findings that shaped this plan:
 - On macOS, local `./gradlew run` additionally needs conditional `-Dapple.awt.UIElement=true` to suppress the Dock icon
 - The `LSUIElement` plist key makes the app a background app (no dock icon)
 - Gradle wrapper is committed to the repo — no global Gradle install needed
+
+---
+
+## Lessons from Competitor Research
+
+> Source: `planning/research/competitor-deep-dive.md` — analysis of 15+ tools (Agentwatch, ccboard,
+> agentlytics, Agentic Radar, Tome, hooks-observability, cli-continues, et al.) with verified GitHub
+> issue links for every pitfall. This section distills the MUST-follow rules for implementation agents.
+
+### 🔴 Hook Exit Code Safety (CRITICAL)
+
+**A monitoring hook that exits non-zero BLOCKS ALL agent Bash operations.**
+
+This was proven by [hooks-observability #30](https://github.com/nicobailey/hooks-observability/issues/30):
+when a Claude Code Bash hook returns a non-zero exit code, Claude cannot execute any further Bash
+commands in that session.
+
+**Rule**: `report.sh` must **ALWAYS** exit 0. Every command must be wrapped with `|| true` or the
+script must use `trap 'exit 0' ERR`. Never use `set -e` in a monitoring hook script.
+
+**Rule**: The Stop hook fires WHILE the agent is shutting down. If a Stop hook invokes the agent's
+own CLI (directly or indirectly), it can create an infinite loop. Guard with an env var:
+```sh
+[ -n "$STOP_HOOK_ACTIVE" ] && exit 0
+export STOP_HOOK_ACTIVE=1
+```
+
+### 🔴 Agent Config Directory Env Var Overrides (CRITICAL)
+
+Agents let users override their config directories via env vars. Hardcoding `~/.agent/` misses
+sessions for users who set these vars.
+
+| Agent | Env Var | Default Path | Impact if Missed |
+|---|---|---|---|
+| Claude Code | `CLAUDE_CONFIG_DIR` | `~/.claude/` | 78% sessions invisible ([agentlytics #38](https://github.com/kamilstanuch/agentlytics/issues/38)) |
+| Codex CLI | `CODEX_HOME` | `~/.codex/` | All sessions invisible when set |
+| Gemini CLI | `GEMINI_CLI_HOME` | `~/.gemini/` | All sessions invisible when set |
+| Copilot CLI | _(none known)_ | `~/.copilot/` | N/A |
+| Cursor | _(none known)_ | `~/.cursor/` | N/A |
+
+**Rule**: Every provider's deploy and read paths MUST check the env var first, falling back to the
+default. Use a helper:
+```kotlin
+fun agentConfigDir(envVar: String?, defaultPath: String): Path =
+    System.getenv(envVar)?.let { Path.of(it) } ?: Path.of(System.getProperty("user.home"), defaultPath)
+```
+
+### 🟡 Adapter Error Isolation
+
+Each `AgentProvider.reconcileAgentState()` must catch its own exceptions and never crash the whole
+app. If one provider's file format changes overnight, the other 4 agents must keep working.
+
+**Rule**: `AgentStateManager.onEvent()` wraps every provider call in `runCatching {}`. On failure:
+log the error, keep the previous state for that agent, continue processing. Never swallow errors
+silently (no empty catch blocks) — always log at WARN level with the agent name and exception.
+
+### 🟡 Dispatchers.IO for All File Operations
+
+Blocking I/O on a coroutine default dispatcher causes broadcast channel capacity overflow and hangs.
+Exact threshold from [ccboard #52](https://github.com/AiCodingBattle/ccboard/issues/52): 44
+symlinks OK, 45 = HANG.
+
+**Rule**: All `Path.readText()`, `Path.readLines()`, `File.listFiles()`, and any filesystem operation
+must run on `Dispatchers.IO` (via `withContext(Dispatchers.IO) { ... }`). The only exception is the
+WatchService `take()` loop which runs in `runInterruptible(Dispatchers.IO)`.
+
+### 🟡 Format Stability (Defensive Parsing)
+
+All observed schema changes across all 5 agents are additive-only: new fields appear, existing fields
+are never removed or renamed. See [`format-stability-research.md`](../research/format-stability-research.md).
+
+**Rule**: Always use `ignoreUnknownKeys = true` in `kotlinx.serialization.json.Json`. Make ALL
+payload fields nullable with defaults — a missing field should never crash parsing:
+```kotlin
+@Serializable
+data class SomePayload(
+    val knownField: String? = null,
+    val anotherField: Int? = null,
+    // New fields from agent updates are silently ignored
+)
+```
+
+### 🟡 Gemini Dual Path + Format
+
+Gemini CLI has two session path layouts. Both MUST be checked:
+- **New**: `~/.gemini/tmp/{hash}/chats/session-*.json` (active sessions)
+- **Legacy**: `~/.gemini/sessions/*.json`
+
+Gemini uses `.json` format (not `.jsonl`). See [cli-continues #23](https://github.com/nicobailey/cli-continues/issues/23).
+
+### 🟢 Anti-Patterns to Avoid
+
+From competitor analysis (Part 6 of competitor-deep-dive.md):
+1. **Silent error swallowing** — agentlytics caught `FileNotFoundError` with empty `except:` → no way to debug. Always log at WARN.
+2. **Filesystem path hardcoding** — every path must go through the env var helper above.
+3. **Blocking I/O on async thread** — always `Dispatchers.IO` for file ops (see above).
+4. **Schema field explosion** — maintain a tight data model, use `extra: Map<String, String>` for ad-hoc fields.
+5. **No migration story** — keep data format versioned from Day 1 (`"version": 1` in config.json).

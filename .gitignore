@@ -7,3 +7,6 @@ bin/
 .DS_Store
 .kotlin/
 settings.json
+
+# Local-only research (not for public repo)
+planning/research/competitor-deep-dive.md

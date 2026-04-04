@@ -17,7 +17,15 @@
 ---
 
 - [ ] **8.1 Deploy Codex notify config**
-  Add/update the `notify` command in `~/.codex/config.toml`. Be careful to preserve existing config content (TOML format).
+  **Resolve config directory**: Check `CODEX_HOME` env var first, fall back to `~/.codex/`:
+  ```kotlin
+  val codexDir = agentConfigDir("CODEX_HOME", ".codex")
+  val configFile = codexDir.resolve("config.toml")
+  ```
+  > ⚠️ Without this check, all Codex sessions are invisible when `CODEX_HOME` is set.
+  > See shared-context.md "Agent Config Directory Env Var Overrides".
+
+  Add/update the `notify` command in `config.toml`. Be careful to preserve existing config content (TOML format).
   Add to `HookDeployer.deployCodexHooks()`:
   ```toml
   notify = ["$HOME/.agent-pulse/hooks/report.sh notify codex-cli"]
@@ -55,7 +63,15 @@
   ```
 
 - [ ] **8.3 Deploy Gemini hook config**
-  Merge into `~/.gemini/settings.json` hooks section. Preserve existing settings content.
+  **Resolve config directory**: Check `GEMINI_CLI_HOME` env var first, fall back to `~/.gemini/`:
+  ```kotlin
+  val geminiDir = agentConfigDir("GEMINI_CLI_HOME", ".gemini")
+  val settingsFile = geminiDir.resolve("settings.json")
+  ```
+  > ⚠️ Without this check, all Gemini sessions are invisible when `GEMINI_CLI_HOME` is set.
+  > See shared-context.md "Agent Config Directory Env Var Overrides".
+
+  Merge into `settings.json` hooks section. Preserve existing settings content.
   Add to `HookDeployer.deployGeminiHooks()`:
   ```json
   {
@@ -66,6 +82,14 @@
     }
   }
   ```
+
+  > **Gemini dual path note**: Gemini CLI uses two session path layouts. Both MUST be checked when
+  > reading session data (post-MVP enrichment):
+  > - **New path**: `<geminiDir>/tmp/{hash}/chats/session-*.json`
+  > - **Legacy path**: `<geminiDir>/sessions/*.json`
+  >
+  > **Format note**: Gemini uses `.json` (single JSON object per file), NOT `.jsonl` (newline-delimited).
+  > See [cli-continues #23](https://github.com/nicobailey/cli-continues/issues/23).
 
 - [ ] **8.4 Implement GeminiProvider.reconcileAgentState()**
   Replace the stub in `src/main/kotlin/com/agentpulse/provider/GeminiProvider.kt`:

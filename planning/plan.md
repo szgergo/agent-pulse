@@ -286,7 +286,7 @@ Implementation agents use **`claude-haiku-4.5`** — fast and cheap. The detaile
 | **UI Framework** | Compose for Desktop (Material 3) | Declarative UI, JetBrains-maintained, reactive state |
 | **Runtime** | JetBrains Runtime (JBR) 25 LTS | Native FSEvents WatchService on macOS (see `research/research-alternative.md`) |
 | **Process Scanning** | [OSHI](https://github.com/oshi/oshi) 6.6.x | **POST-MVP.** Cross-platform process enumeration fallback for agents without hooks |
-| **File Watching** | `java.nio.file.WatchService` (JBR) | Native FSEvents on macOS via JBR, ~100ms latency |
+| **File Watching** | `java.nio.file.WatchService` (JBR) | Native FSEvents on macOS via JBR (default, zero-config). Use `take()` + `SensitivityWatchEventModifier.HIGH` for 100ms latency, zero CPU |
 | **SQLite** | [sqlite-jdbc](https://github.com/xerial/sqlite-jdbc) 3.46.x | **POST-MVP.** Read-only access to agent databases for enrichment layer |
 | **JSON** | kotlinx-serialization-json | Kotlin-native, fast, compile-time safe |
 | **YAML** | [kaml](https://github.com/charleskorn/kaml) | **POST-MVP.** Parse Copilot's `workspace.yaml` for enrichment |
@@ -393,13 +393,13 @@ Branch naming: `step-1-scaffold`, `step-2-data-model`, `step-3-detection`, `step
 │  │       4. Update StateFlow<List<AgentState>>                       │ │
 │  │       5. Delete processed file                                    │ │
 │  │                                                                   │ │
-│  │  On startup: scan events/ dir for queued files (recovery)        │ │
+│  │  On startup: group queued files by (agent,pid), process latest   │ │
 │  │  Periodic: validate active PIDs (kill -0), cleanup stale files   │ │
 │  └───────────────────────────────────────────────────────────────────┘ │
 │                                                                       │
 │  ┌─ Hook Deployer ──────────────────────────────────────────────────┐ │
 │  │  First-run setup: detect installed agents, deploy hook configs    │ │
-│  │  Creates: ~/.agent-pulse/hooks/report.sh (3-line POSIX sh)       │ │
+│  │  Creates: ~/.agent-pulse/hooks/report.sh (~8-line POSIX sh)      │ │
 │  │  Copilot CLI: ~/.copilot/hooks/agent-pulse.json                  │ │
 │  │  Claude Code: merge into ~/.claude/settings.json                 │ │
 │  │  Cursor: ~/.cursor/hooks.json                                    │ │
@@ -573,9 +573,9 @@ Each step is a separate branch + PR. Within each step, sub-tasks are sequential.
 **Goal**: Background file watcher on `~/.agent-pulse/events/` + first-run hook deployer.
 
 **Key deliverables**:
-- `HookEventWatcher` — WatchService (JBR native FSEvents on macOS), watches for ENTRY_CREATE, parses filename+content into `HookEvent`, feeds to `AgentStateManager`, deletes processed files
-- `HookDeployer` — creates `~/.agent-pulse/hooks/report.sh` (3-line POSIX sh, ~30ms), creates events directory, tracks deployment state in `config.json`
-- Startup recovery: processes any queued files on launch
+- `HookEventWatcher` — WatchService (JBR native FSEvents, zero-config default), uses blocking `take()` + `SensitivityWatchEventModifier.HIGH` (100ms latency, zero CPU), watches for ENTRY_CREATE, parses filename+content into `HookEvent`, feeds to `AgentStateManager`, deletes processed files. No polling, no debounce — FSEvents coalesces at kernel level.
+- `HookDeployer` — creates `~/.agent-pulse/hooks/report.sh` (~8-line POSIX sh, ~30ms, self-cleaning 1000-file cap to limit disk use when agent-pulse is offline), creates events directory, tracks deployment state in `config.json`
+- Startup recovery: on launch, groups queued files by `(agent, pid)`, processes only the latest per group, deletes stale ones — prevents replay of hundreds of accumulated events
 - PID liveness: periodic check for stale sessions
 
 > 📄 **Full implementation details**: See [`steps/step03.md`](implementation/steps/step03.md)
@@ -740,13 +740,19 @@ This plan is informed by extensive research documented in companion files:
 |---|---|---|
 | `research/research-alternative.md` | Tech stack decision: why JBR over Tauri/Rust/FFM | 258 |
 | `research/agent-research.md` | Agent hooks, safety analysis, delivery architecture, per-agent analysis, three-layer architecture | ~1,800 |
+| `research/jbr-watchservice-research.md` | JBR native FSEvents WatchService vs OpenJDK polling vs IntelliJ fsnotifier — architecture, source analysis, correct usage | ~450 |
+| `research/format-stability-research.md` | Schema evolution evidence, defensive parsing strategies, ignoreUnknownKeys rationale | ~700 |
+| `research/competitor-deep-dive.md` | Analysis of 15+ competing tools — pitfalls, action items, anti-patterns (local only, gitignored) | ~1,200 |
+| `research/competitive-landscape.md` | Market positioning vs Agentic Radar, ccboard, Tome, et al. | ~200 |
 
 Key research findings that shaped this plan:
 1. **Hooks are a stable API** — agents publish and maintain hook schemas. File system paths are internal implementation details with no API contract.
 2. **Hook safety analysis** — hooks are synchronous/blocking in Copilot CLI, Claude Code, and Gemini. Our hook script must execute in <50ms. Disk-only design (no network) achieves ~30ms.
 3. **Delivery mechanism comparison** — disk files + FileWatch is the only approach that is durable (survives restarts), has zero dependencies, and poses zero risk to agents. Named pipes block, stdout corrupts, HTTP adds latency.
-4. **JBR FileWatch** — standard OpenJDK uses polling (2-10s) on macOS; JBR uses native FSEvents (~100-500ms). This drove the Kotlin/JBR choice.
+4. **JBR FileWatch** — standard OpenJDK uses `PollingWatchService` (stat-based, 2-10s) on macOS; JBR replaces it with native `MacOSXWatchService` backed by FSEvents via JNI. This is the **default** on JBR — no system properties needed. Use `take()` (blocks on `LinkedBlockingDeque`, zero CPU) + `SensitivityWatchEventModifier.HIGH` (100ms FSEvents latency). See [`research/jbr-watchservice-research.md`](research/jbr-watchservice-research.md).
 5. **Read-only principle** — agent-pulse never writes to agent directories. Only writes to its own `~/.agent-pulse/` directory.
+6. **Format stability** — all schema changes across agents are additive-only. `ignoreUnknownKeys = true` handles this. See [`research/format-stability-research.md`](research/format-stability-research.md).
+7. **Competitor pitfalls** — 15+ tools analyzed. Critical lessons: hook exit code safety (#30), env var overrides (#38), adapter error isolation, Dispatchers.IO mandate. See `shared-context.md` "Lessons from Competitor Research".
 
 ---
 

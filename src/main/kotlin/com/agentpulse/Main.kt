@@ -99,10 +99,8 @@ val dummyAgents = listOf(
     Agent("Cursor Agent", AgentStatus.OFFLINE, "Fix CSS layout"),
 )
 
-fun main() = application {
-    // --- Step 3: Hook infrastructure ---
-    // NOTE: Providers and stateManager are created at application scope so they
-    // survive window open/close cycles in this system-tray app.
+fun main() {
+    // --- Step 3: Hook infrastructure — plain Kotlin, runs exactly once ---
     val providers = listOf(
         CopilotCliProvider(),
         ClaudeCodeProvider(),
@@ -116,7 +114,8 @@ fun main() = application {
     HookDeployer().deployIfNeeded()
 
     // Start event watcher — non-blocking, launches coroutines on its own IO scope.
-    // Must live at application level, NOT inside a LaunchedEffect or Window { } block.
+    // Lives outside application { } so it is never restarted on recomposition and
+    // survives window open/close cycles in this system-tray app.
     val watcher = HookEventWatcher(stateManager)
     watcher.start()
 
@@ -124,109 +123,111 @@ fun main() = application {
     Runtime.getRuntime().addShutdownHook(Thread { watcher.stop() })
 
     // stateManager.agents is available for Step 5 to observe
-    var isVisible by remember { mutableStateOf(false) }
-    var spinnerIndex by remember { mutableStateOf(0) }
-    val popupWidthPx = 360
-    val popupHeightPx = 440
+    application {
+        var isVisible by remember { mutableStateOf(false) }
+        var spinnerIndex by remember { mutableStateOf(0) }
+        val popupWidthPx = 360
+        val popupHeightPx = 440
 
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(100.milliseconds)
-            spinnerIndex = (spinnerIndex + 1) % SPINNER.size
-        }
-    }
-
-    val spinner = SPINNER[spinnerIndex]
-
-    val windowState = rememberWindowState(
-        size = DpSize(popupWidthPx.dp, popupHeightPx.dp),
-        position = WindowPosition(Alignment.TopEnd),
-    )
-
-    Tray(
-        icon = painterResource(Res.drawable.tray_icon),
-        tooltip = "agent-pulse",
-        onAction = {
-            MouseInfo.getPointerInfo()?.location?.let { pointer ->
-                val bounds = GraphicsEnvironment
-                    .getLocalGraphicsEnvironment()
-                    .defaultScreenDevice
-                    .defaultConfiguration
-                    .bounds
-
-                val targetX = (pointer.x - popupWidthPx / 2)
-                    .coerceIn(bounds.x, bounds.x + bounds.width - popupWidthPx)
-                val targetY = (pointer.y + 8)
-                    .coerceIn(bounds.y, bounds.y + bounds.height - popupHeightPx)
-
-                windowState.position = WindowPosition(targetX.dp, targetY.dp)
+        LaunchedEffect(Unit) {
+            while (true) {
+                delay(100.milliseconds)
+                spinnerIndex = (spinnerIndex + 1) % SPINNER.size
             }
-            isVisible = !isVisible
-        },
-    )
+        }
+
+        val spinner = SPINNER[spinnerIndex]
+
+        val windowState = rememberWindowState(
+            size = DpSize(popupWidthPx.dp, popupHeightPx.dp),
+            position = WindowPosition(Alignment.TopEnd),
+        )
+
+        Tray(
+            icon = painterResource(Res.drawable.tray_icon),
+            tooltip = "agent-pulse",
+            onAction = {
+                MouseInfo.getPointerInfo()?.location?.let { pointer ->
+                    val bounds = GraphicsEnvironment
+                        .getLocalGraphicsEnvironment()
+                        .defaultScreenDevice
+                        .defaultConfiguration
+                        .bounds
+
+                    val targetX = (pointer.x - popupWidthPx / 2)
+                        .coerceIn(bounds.x, bounds.x + bounds.width - popupWidthPx)
+                    val targetY = (pointer.y + 8)
+                        .coerceIn(bounds.y, bounds.y + bounds.height - popupHeightPx)
+
+                    windowState.position = WindowPosition(targetX.dp, targetY.dp)
+                }
+                isVisible = !isVisible
+            },
+        )
 
 
-    if (isVisible) {
-        Window(
-            onCloseRequest = { isVisible = false },
-            state = windowState,
-            title = "agent-pulse",
-            resizable = false,
-            undecorated = true,
-            alwaysOnTop = true,
-            transparent = true,
-        ) {
-            MaterialTheme(colorScheme = californiaVibesScheme) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(MaterialTheme.colorScheme.background)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        val quitInteraction = remember { MutableInteractionSource() }
-                        val isQuitHovered by quitInteraction.collectIsHoveredAsState()
-                        val quitButtonColor by animateColorAsState(
-                            targetValue = if (isQuitHovered) CaliforniaSunset.copy(alpha = 0.38f)
-                            else CaliforniaCard.copy(alpha = 0.72f),
-                            label = "quitButtonHover"
-                        )
-
-                        // Header with title and Quit button
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                "🫀 agent-pulse",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
+        if (isVisible) {
+            Window(
+                onCloseRequest = { isVisible = false },
+                state = windowState,
+                title = "agent-pulse",
+                resizable = false,
+                undecorated = true,
+                alwaysOnTop = true,
+                transparent = true,
+            ) {
+                MaterialTheme(colorScheme = californiaVibesScheme) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(MaterialTheme.colorScheme.background)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            val quitInteraction = remember { MutableInteractionSource() }
+                            val isQuitHovered by quitInteraction.collectIsHoveredAsState()
+                            val quitButtonColor by animateColorAsState(
+                                targetValue = if (isQuitHovered) CaliforniaSunset.copy(alpha = 0.38f)
+                                else CaliforniaCard.copy(alpha = 0.72f),
+                                label = "quitButtonHover"
                             )
-                            Spacer(Modifier.weight(1f))
-                            Button(
-                                onClick = { exitApplication() },
-                                shape = RoundedCornerShape(percent = 50),
-                                interactionSource = quitInteraction,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = quitButtonColor,
-                                    contentColor = Color.White,
-                                ),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                            ) {
-                                Text("Quit", fontSize = 12.sp)
-                            }
-                        }
-                        Text(
-                            "${dummyAgents.count { it.status == AgentStatus.ONLINE || it.status == AgentStatus.BUSY }} of ${dummyAgents.size} agents active",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(Modifier.height(16.dp))
 
-                        dummyAgents.forEach { agent ->
-                            AgentCard(agent, spinner)
-                            Spacer(Modifier.height(8.dp))
+                            // Header with title and Quit button
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    "🫀 agent-pulse",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                )
+                                Spacer(Modifier.weight(1f))
+                                Button(
+                                    onClick = { exitApplication() },
+                                    shape = RoundedCornerShape(percent = 50),
+                                    interactionSource = quitInteraction,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = quitButtonColor,
+                                        contentColor = Color.White,
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                ) {
+                                    Text("Quit", fontSize = 12.sp)
+                                }
+                            }
+                            Text(
+                                "${dummyAgents.count { it.status == AgentStatus.ONLINE || it.status == AgentStatus.BUSY }} of ${dummyAgents.size} agents active",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.height(16.dp))
+
+                            dummyAgents.forEach { agent ->
+                                AgentCard(agent, spinner)
+                                Spacer(Modifier.height(8.dp))
+                            }
                         }
                     }
                 }

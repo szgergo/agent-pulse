@@ -1,4 +1,4 @@
-# Step 3: watcher — Hook event watcher + deployer
+# Step 3: watcher — Hook event watcher + deployer — DONE
 
 > **⚠️ READ `shared-context.md` FIRST** — it contains all design principles, architecture,
 > and project structure that apply to this step.

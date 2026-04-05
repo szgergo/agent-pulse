@@ -190,11 +190,12 @@
   git commit -m "chore: add report-copilot.sh as classpath resource for HookDeployer"
   ```
 
-- [ ] **4.2a Create `agentConfigDir()` utility function**
+- [ ] **4.2a Create path utility functions (`PathUtils.kt`)**
 
-  The `agentConfigDir` helper is defined in shared-context.md but has never been implemented in
-  source code. Both CopilotHookDeployer (4.2b) and CopilotAgentProvider (4.3) depend on it.
-  Create it as a top-level function in a new file:
+  These helpers are defined in shared-context.md but have never been implemented in source code.
+  Both CopilotHookDeployer (4.2b) and CopilotAgentProvider (4.3) depend on `agentConfigDir()`.
+  The path helpers (`agentPulseHooksDir`, etc.) are also used by 4.2b and replace hardcoded paths
+  in two existing files (see end of this step). Create the file:
 
   ```kotlin
   // File: src/main/kotlin/com/agentpulse/util/PathUtils.kt
@@ -237,6 +238,31 @@
       agentPulseBaseDir().resolve("events")
   ```
 
+  Now that PathUtils.kt is created, update two existing files to use these helpers instead of
+  hardcoded paths:
+
+  - **`deploy/AgentPulseHookDeployer.kt`** — replace:
+    ```kotlin
+    private val baseDir = Path.of(System.getProperty("user.home"), ".agent-pulse")
+    ```
+    with:
+    ```kotlin
+    import com.agentpulse.util.agentPulseBaseDir
+    // ...
+    private val baseDir = agentPulseBaseDir()
+    ```
+
+  - **`watcher/HookEventWatcher.kt`** — replace the default parameter value:
+    ```kotlin
+    private val eventsDir: Path = Path.of(System.getProperty("user.home"), ".agent-pulse", "events"),
+    ```
+    with:
+    ```kotlin
+    import com.agentpulse.util.agentPulseEventsDir
+    // ...
+    private val eventsDir: Path = agentPulseEventsDir(),
+    ```
+
 - [ ] **4.2b Automate deployment (`CopilotHookDeployer`)**
 
   Create `CopilotHookDeployer : HookDeployer` in `deploy/CopilotHookDeployer.kt`.
@@ -248,7 +274,7 @@
   - Copilot merges **all** `*.json` files from its hooks directory — other hook files are untouched and stay active alongside ours
   - Always overwrite our own `agent-pulse.json` on startup (keeps it in sync after app updates)
   - Guard step 2 with a Copilot-installed check: if `COPILOT_HOME`/`~/.copilot` does not exist, log a warning and skip — Copilot is not installed
-  - `agentPulseHooksDir.createDirectories()` is unconditional (it's our own directory); `copilotHooksDir.createDirectories()` only runs after confirming the parent exists
+  - `hooksDir.createDirectories()` is unconditional (it's our own directory); `copilotHooksDir.createDirectories()` only runs after confirming the parent exists
   - Deploy the script first, then the config (same order as the PoC)
 
   ```kotlin

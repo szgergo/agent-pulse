@@ -10,7 +10,7 @@
 
 ---
 
-**Goal**: Background event watcher that monitors `~/.agent-pulse/events/` for hook event files, parses them into `HookEvent` objects, and feeds them to `AgentStateManager`. Plus a first-run hook deployer that creates the shared hook infrastructure (`report.sh`, events directory).
+**Goal**: Background event watcher that monitors `~/.agent-pulse/events/` for hook event files, parses them into `HookEvent` objects, and feeds them to `AgentSessionManager`. Plus a first-run hook deployer that creates the shared hook infrastructure (`report.sh`, events directory).
 
 **Pre-check**: Step 2 PR is merged. `./gradlew build` passes.
 
@@ -32,7 +32,7 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   → Parses filename: <timestamp>-<agent>-<eventType>-<ppid>.json
   → Reads file content and deserializes to typed HookPayload based on agent
   → Creates HookEvent(agent, eventType, pid, timestamp, payload)
-  → AgentStateManager.onEvent(event)
+  → AgentSessionManager.onEvent(event)
   → Routes to provider → updates StateFlow → UI reacts
 ```
 
@@ -110,7 +110,7 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   - On new file: parse filename `<timestamp>-<agent>-<eventType>-<ppid>.json`
   - Read file content and deserialize to typed `HookPayload` via `kotlinx.serialization.json.Json`
   - Create `HookEvent(agent, eventType, pid, timestamp, payload)`
-  - Call `AgentStateManager.onEvent(event)`
+  - Call `AgentSessionManager.onEvent(event)`
   - Delete processed file (cleanup)
   - Ignore files starting with `.tmp.` (still being written by `report.sh`'s atomic rename pattern)
   - Startup scan: on launch, process any existing files in `events/` dir (recovery after restart)
@@ -134,7 +134,7 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   import com.agentpulse.model.CursorPayload
   import com.agentpulse.model.CodexPayload
   import com.agentpulse.model.GeminiPayload
-  import com.agentpulse.provider.AgentStateManager
+  import com.agentpulse.provider.AgentSessionManager
   import kotlinx.coroutines.CoroutineScope
   import kotlinx.coroutines.Dispatchers
   import kotlinx.coroutines.SupervisorJob
@@ -156,7 +156,7 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   import kotlin.io.path.readText
 
   class HookEventWatcher(
-      private val stateManager: AgentStateManager,
+      private val stateManager: AgentSessionManager,
       private val eventsDir: Path = Path.of(System.getProperty("user.home"), ".agent-pulse", "events"),
   ) {
       private companion object {
@@ -459,7 +459,7 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
 - [x] **3.3 Wire into Main.kt**
   - **Do NOT modify the existing UI** (dummy agents, AgentCard, local `AgentStatus`/`Agent` types). The UI is replaced in Step 5. In this step, only add the watcher and deployer initialization alongside the existing code.
   - Note: `Main.kt` has a local `AgentStatus` enum and `Agent` data class from the scaffold. These will conflict with imports from the `model` package — use fully-qualified names or avoid importing `com.agentpulse.model.AgentStatus` in Main.kt for now. Step 5 removes the local types.
-  - Create `AgentStateManager` with all stub providers from Step 2
+  - Create `AgentSessionManager` with all stub providers from Step 2
   - Create `HookDeployer()` — call `deployIfNeeded()` on first launch
   - Create `HookEventWatcher(stateManager)` — call `start()` in `main()` before the `application` block (not inside a `LaunchedEffect` — the watcher has its own `CoroutineScope` and must survive window open/close cycles in this system-tray app)
   - Add a JVM shutdown hook to call `watcher.stop()` for clean cancellation on quit
@@ -475,7 +475,7 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
       CodexProvider(),
       GeminiProvider(),
   )
-  val stateManager = AgentStateManager(providers)
+  val stateManager = AgentSessionManager(providers)
 
   // Deploy hook infrastructure on first run
   HookDeployer().deployIfNeeded()
@@ -498,7 +498,7 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   ```kotlin
   import com.agentpulse.deploy.HookDeployer
   import com.agentpulse.watcher.HookEventWatcher
-  import com.agentpulse.provider.AgentStateManager
+  import com.agentpulse.provider.AgentSessionManager
   import com.agentpulse.provider.CopilotCliProvider
   import com.agentpulse.provider.ClaudeCodeProvider
   import com.agentpulse.provider.CursorProvider
@@ -533,7 +533,7 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   - .tmp. file exclusion, cleanup after processing
   - HookDeployer: report.sh with self-cleaning 1000-file cap (~4 MB max)
   - Deployment state tracked in ~/.agent-pulse/config.json
-  - Wired into Main.kt with AgentStateManager
+  - Wired into Main.kt with AgentSessionManager
 
   Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
   git push -u origin step-3-watcher

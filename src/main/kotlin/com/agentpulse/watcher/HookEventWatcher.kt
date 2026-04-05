@@ -10,7 +10,7 @@ import com.agentpulse.model.GeminiPayload
 import com.agentpulse.model.HookEvent
 import com.agentpulse.model.HookEventType
 import com.agentpulse.model.HookPayload
-import com.agentpulse.provider.AgentStateManager
+import com.agentpulse.provider.AgentSessionManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -33,7 +33,7 @@ import kotlin.io.path.nameWithoutExtension
 import kotlin.io.path.readText
 
 class HookEventWatcher(
-    private val stateManager: AgentStateManager,
+    private val stateManager: AgentSessionManager,
     private val eventsDir: Path = Path.of(System.getProperty("user.home"), ".agent-pulse", "events"),
 ) {
     private companion object {

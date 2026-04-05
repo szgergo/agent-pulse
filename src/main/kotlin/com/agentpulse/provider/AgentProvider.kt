@@ -12,7 +12,7 @@ import com.agentpulse.model.HookEvent
  * extracting session IDs, status, working directory, etc.
  *
  * Providers are pure functions: given an event and optional current state,
- * they return a reconciled state. State management is handled by [AgentStateManager].
+ * they return a reconciled state. State management is handled by [AgentSessionManager].
  */
 interface AgentProvider {
     val agentType: AgentType

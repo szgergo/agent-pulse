@@ -12,7 +12,7 @@
 
 **Pre-check**: Step 7 PR is merged. `git checkout main && git pull`. `./gradlew build` passes.
 
-**App state AFTER this step**: Codex CLI fires its `notify` command which invokes `report.sh`, and events flow through `CodexProvider.reconcileAgentState()` into `AgentStateManager`. Gemini CLI fires `AfterTool` hook events which flow through `GeminiProvider.reconcileAgentState()`. Both agents appear in the dashboard when active.
+**App state AFTER this step**: Codex CLI fires its `notify` command which invokes `report.sh`, and events flow through `CodexProvider.reconcileAgentState()` into `AgentSessionManager`. Gemini CLI fires `AfterTool` hook events which flow through `GeminiProvider.reconcileAgentState()`. Both agents appear in the dashboard when active.
 
 ---
 

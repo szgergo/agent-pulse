@@ -465,7 +465,7 @@ agent-pulse/
 │   │   │   └── HookEvent.kt
 │   │   ├── provider/
 │   │   │   ├── AgentProvider.kt
-│   │   │   ├── AgentStateManager.kt
+│   │   │   ├── AgentSessionManager.kt
 │   │   │   ├── CopilotCliProvider.kt       (Step 4)
 │   │   │   ├── ClaudeCodeProvider.kt       (Step 6)
 │   │   │   ├── CursorProvider.kt           (Step 7)
@@ -558,7 +558,7 @@ Each step is a separate branch + PR. Within each step, sub-tasks are sequential.
 - `HookPayload` sealed interface — per-agent typed payload classes (CopilotPayload, ClaudePayload, CursorPayload, CodexPayload, GeminiPayload) with @Serializable + @SerialName annotations
 - `AgentType` enum, `AgentStatus` enum
 - `AgentProvider` interface — single method: `fun reconcileAgentState(event: HookEvent, currentState: AgentState?): AgentState`
-- `AgentStateManager` — routes events to providers, manages `StateFlow<List<AgentState>>`
+- `AgentSessionManager` — routes events to providers, manages `StateFlow<List<AgentState>>`
 - `SearchIndexer` interface + `NoopIndexer`
 - Stub providers for all 5 agent types
 
@@ -573,7 +573,7 @@ Each step is a separate branch + PR. Within each step, sub-tasks are sequential.
 **Goal**: Background file watcher on `~/.agent-pulse/events/` + first-run hook deployer.
 
 **Key deliverables**:
-- `HookEventWatcher` — WatchService (JBR native FSEvents, zero-config default), uses blocking `take()` + `SensitivityWatchEventModifier.HIGH` (100ms latency, zero CPU), watches for ENTRY_CREATE, parses filename+content into `HookEvent`, feeds to `AgentStateManager`, deletes processed files. No polling, no debounce — FSEvents coalesces at kernel level.
+- `HookEventWatcher` — WatchService (JBR native FSEvents, zero-config default), uses blocking `take()` + `SensitivityWatchEventModifier.HIGH` (100ms latency, zero CPU), watches for ENTRY_CREATE, parses filename+content into `HookEvent`, feeds to `AgentSessionManager`, deletes processed files. No polling, no debounce — FSEvents coalesces at kernel level.
 - `HookDeployer` — creates `~/.agent-pulse/hooks/report.sh` (~8-line POSIX sh, ~30ms, self-cleaning 1000-file cap to limit disk use when agent-pulse is offline), creates events directory, tracks deployment state in `config.json`
 - Startup recovery: on launch, groups queued files by `(agent, pid)`, processes only the latest per group, deletes stale ones — prevents replay of hundreds of accumulated events
 - PID liveness: periodic check for stale sessions
@@ -598,7 +598,7 @@ Each step is a separate branch + PR. Within each step, sub-tasks are sequential.
 
 ### Step 5: ui — System tray dashboard UI
 
-**Goal**: Replace placeholder cards with live `AgentState` data from `AgentStateManager.agents` StateFlow.
+**Goal**: Replace placeholder cards with live `AgentState` data from `AgentSessionManager.agents` StateFlow.
 
 **Key deliverables**:
 - `Dashboard.kt` — observes `StateFlow<List<AgentState>>`, auto-updates on state changes

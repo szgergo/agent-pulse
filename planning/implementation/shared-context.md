@@ -496,7 +496,7 @@ agent-pulse/
 │   │   │   └── HookEventType.kt
 │   │   ├── provider/
 │   │   │   ├── AgentProvider.kt              (Step 3 — interface)
-│   │   │   ├── AgentStateManager.kt          (Step 3)
+│   │   │   ├── AgentSessionManager.kt          (Step 3)
 │   │   │   ├── CopilotAgentProvider.kt       (Step 4 — abstract base)
 │   │   │   ├── CopilotCliProvider.kt         (Step 4)
 │   │   │   ├── CopilotVsCodeProvider.kt      (Step 4)
@@ -665,7 +665,7 @@ fun agentConfigDir(envVar: String?, defaultPath: String): Path =
 Each `AgentProvider.reconcileAgentState()` must catch its own exceptions and never crash the whole
 app. If one provider's file format changes overnight, the other 4 agents must keep working.
 
-**Rule**: `AgentStateManager.onEvent()` wraps every provider call in `runCatching {}`. On failure:
+**Rule**: `AgentSessionManager.onEvent()` wraps every provider call in `runCatching {}`. On failure:
 log the error, keep the previous state for that agent, continue processing. Never swallow errors
 silently (no empty catch blocks) — always log at WARN level with the agent name and exception.
 

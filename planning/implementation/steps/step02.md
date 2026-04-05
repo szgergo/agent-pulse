@@ -10,7 +10,7 @@
 
 **Pre-check**: Step 1 PR is merged. `git checkout main && git pull`. `./gradlew run` shows the tray app.
 
-**App state AFTER this step**: Same visible behavior as Step 1. But now the code has: `AgentState`/`HookEvent` data classes, `AgentProvider` interface with `reconcileAgentState()` method, `AgentStateManager` (central state holder with `StateFlow`), `SearchIndexer` interface, and stub providers for all 5 agent types. `./gradlew build` passes with zero warnings.
+**App state AFTER this step**: Same visible behavior as Step 1. But now the code has: `AgentState`/`HookEvent` data classes, `AgentProvider` interface with `reconcileAgentState()` method, `AgentSessionManager` (central state holder with `StateFlow`), `SearchIndexer` interface, and stub providers for all 5 agent types. `./gradlew build` passes with zero warnings.
 
 ---
 
@@ -229,7 +229,7 @@
 
 - [x] **2.8 Create src/main/kotlin/com/agentpulse/provider/AgentProvider.kt**
   Pure event processor. Each implementation knows how to translate its agent's hook JSON
-  into the universal `AgentState`. The provider is stateless — state is held by `AgentStateManager`.
+  into the universal `AgentState`. The provider is stateless — state is held by `AgentSessionManager`.
   ```kotlin
   package com.agentpulse.provider
 
@@ -241,7 +241,7 @@
    * Translates agent-specific hook events into universal [AgentState].
    *
    * Providers are pure functions: given an event and optional current state,
-   * they return a reconciled state. State management is handled by [AgentStateManager].
+   * they return a reconciled state. State management is handled by [AgentSessionManager].
    */
   interface AgentProvider {
       val agentType: AgentType
@@ -256,7 +256,7 @@
   }
   ```
 
-- [x] **2.9 Create src/main/kotlin/com/agentpulse/provider/AgentStateManager.kt**
+- [x] **2.9 Create src/main/kotlin/com/agentpulse/provider/AgentSessionManager.kt**
   Central state holder. Routes hook events to providers, maintains the reactive state
   that Compose UI observes. Replaces both `HookEventStore` and `ProviderRegistry`.
   ```kotlin
@@ -275,7 +275,7 @@
    * Receives [HookEvent]s (pushed by FileWatcher), routes them to the appropriate
    * [AgentProvider], and updates the reactive [agents] StateFlow that Compose UI observes.
    */
-  class AgentStateManager(
+  class AgentSessionManager(
       providers: List<AgentProvider>,
   ) {
       private val providerMap: Map<AgentType, AgentProvider> =
@@ -378,13 +378,13 @@
 
   - AgentState, HookEvent, AgentType, AgentStatus data classes
   - AgentProvider interface with reconcileAgentState(event, currentState?) → AgentState
-  - AgentStateManager: central state holder with StateFlow, routes events to providers
+  - AgentSessionManager: central state holder with StateFlow, routes events to providers
   - SearchIndexer interface + NoopIndexer
   - Stub providers for Copilot, Claude, Cursor, Codex, Gemini
 
   Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
   git push -u origin step-2-data-model
   gh pr create --title "Step 2: Data model and provider system" \
-    --body "Core types, AgentProvider with reconcileAgentState(), AgentStateManager with StateFlow, stub providers." \
+    --body "Core types, AgentProvider with reconcileAgentState(), AgentSessionManager with StateFlow, stub providers." \
     --base main
   ```

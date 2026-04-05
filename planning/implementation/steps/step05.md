@@ -306,7 +306,7 @@
 
 - [ ] **5.5 Create App.kt**
     - Navigation: Dashboard ↔ Settings
-    - Wire to AgentStateManager.agents StateFlow
+    - Wire to AgentSessionManager.agents StateFlow
 
   ```kotlin
   package com.agentpulse.ui
@@ -316,10 +316,10 @@
   import androidx.compose.runtime.mutableStateOf
   import androidx.compose.runtime.remember
   import androidx.compose.runtime.setValue
-  import com.agentpulse.provider.AgentStateManager
+  import com.agentpulse.provider.AgentSessionManager
 
   @Composable
-  fun App(stateManager: AgentStateManager) {
+  fun App(stateManager: AgentSessionManager) {
       var screen by remember { mutableStateOf("dashboard") }
 
       AgentPulseTheme {

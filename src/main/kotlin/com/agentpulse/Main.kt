@@ -41,7 +41,7 @@ import com.agentpulse.agent_pulse.generated.resources.Res
 import com.agentpulse.agent_pulse.generated.resources.tray_icon
 import com.agentpulse.deploy.AgentPulseHookDeployer
 import com.agentpulse.deploy.HookDeployer
-import com.agentpulse.provider.AgentStateManager
+import com.agentpulse.provider.AgentSessionManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -88,7 +88,7 @@ fun main() {
         CodexProvider(),
         GeminiProvider(),
     )
-    val stateManager = AgentStateManager(providers)
+    val stateManager = AgentSessionManager(providers)
 
     // Deploy hook infrastructure — each deployer runs in parallel on IO to avoid
     // blocking the main thread before the tray icon renders.

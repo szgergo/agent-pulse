@@ -542,14 +542,14 @@
   > - Update `Notification` comment from `/** User notification triggered. Raw: 'Notification'. */` to:
   >   `/** Notification triggered. Agents: Claude (Notification), Copilot (notification, 1.0.18+, async — fires on agent completion). */`
 
-  **Hardening: `AgentStateManager.onEvent()` error isolation** (per shared-context.md §Adapter Error Isolation):
+  **Hardening: `AgentSessionManager.onEvent()` error isolation** (per shared-context.md §Adapter Error Isolation):
 
   The current `onEvent()` calls `provider.reconcileAgentState()` with no error handling. A provider
   exception (ClassCastException, IOException, NPE from malformed payload) would propagate to the
   FileWatcher's catch block. Add `runCatching` so a single broken provider never crashes the event loop:
 
   ```kotlin
-  // In AgentStateManager.kt — replace the direct call with runCatching
+  // In AgentSessionManager.kt — replace the direct call with runCatching
   fun onEvent(event: HookEvent) {
       val provider = providerMap[event.agent] ?: return
       val currentAgentStates = _mutableAgentList.value
@@ -592,7 +592,7 @@
   - Modify three existing Copilot provider stubs to extend CopilotAgentProvider
   - CopilotHookDeployer (implements HookDeployer interface) automates deployment on startup
   - Add SubagentStart, PostToolUseFailure, PermissionRequest to HookEventType
-  - runCatching error isolation in AgentStateManager.onEvent()
+  - runCatching error isolation in AgentSessionManager.onEvent()
 
   Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
   git push -u origin step-4-copilot-provider

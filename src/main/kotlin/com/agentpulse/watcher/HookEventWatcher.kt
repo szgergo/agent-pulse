@@ -104,7 +104,7 @@ class HookEventWatcher(
         if (!file.exists()) return
         try {
             val allParts = file.nameWithoutExtension.split("-")
-            if (allParts.size < 5) return
+            if (allParts.size < 4) return
 
             // Guard: hook event files are ~225 bytes. Skip anything suspiciously large
             // to avoid OOM if a rogue process writes to our events dir.
@@ -114,13 +114,15 @@ class HookEventWatcher(
                 return
             }
 
-            val timestampStr = allParts.first()
+            // Filename format: {agentName}-{eventType}-{pid}-{suffix}
+            // suffix (last part) is ignored; read from the end to tolerate multi-segment agent names.
             val pidStr = allParts[allParts.size - 2]
             val eventType = allParts[allParts.size - 3]
-            val agentName = allParts.subList(1, allParts.size - 3).joinToString("-")
+            val agentName = allParts.subList(0, allParts.size - 3).joinToString("-")
             val agent = AgentType.forName(agentName) ?: return
             val pid = pidStr.toIntOrNull() ?: return
-            val epochSeconds = timestampStr.toLongOrNull() ?: return
+            // Use file modification time (ms precision) instead of a filename timestamp.
+            val timestamp = runCatching { Files.getLastModifiedTime(file).toInstant() }.getOrElse { Instant.now() }
 
             val content = file.readText()
             val payload = HookPayload.fromRawPayload(agent, content)
@@ -129,7 +131,7 @@ class HookEventWatcher(
                 agent = agent,
                 eventType = HookEventType.fromRaw(eventType),
                 pid = pid,
-                timestamp = Instant.ofEpochSecond(epochSeconds),
+                timestamp = timestamp,
                 payload = payload,
             )
 
@@ -146,15 +148,16 @@ class HookEventWatcher(
         // On startup, there may be many queued events accumulated while agent-pulse was offline.
         // We only care about the latest state per (agent, pid) — older events are stale.
         // Group by (agent, pid), keep only the last file per group, delete the rest.
+        // Sort by lastModifiedTime (ms precision) — more accurate than filename for same-second events.
         val processable = eventsDir.listDirectoryEntries()
             .filter { it.isProcessableEvent() }
-            .sortedBy { it.name }  // Chronological — timestamp is first in filename
+            .sortedBy { file -> runCatching { Files.getLastModifiedTime(file).toMillis() }.getOrDefault(0L) }
 
         val grouped = processable
-            .filter { file -> file.nameWithoutExtension.split("-").size >= 5 }
+            .filter { file -> file.nameWithoutExtension.split("-").size >= 4 }
             .groupBy { file ->
                 val allParts = file.nameWithoutExtension.split("-")
-                val agentName = allParts.subList(1, allParts.size - 3).joinToString("-")
+                val agentName = allParts.subList(0, allParts.size - 3).joinToString("-")
                 val pid = allParts[allParts.size - 2]
                 "$agentName-$pid"  // e.g. "copilot-cli-12345"
             }

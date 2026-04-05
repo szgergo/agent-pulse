@@ -9,4 +9,4 @@ mkdir -p "$EVENTS_DIR" || exit 0
 T=$(mktemp "$EVENTS_DIR/.tmp.XXXXXX") || exit 0
 SUFFIX=${T##*.tmp.}
 cat > "$T" || { rm -f "$T" 2>/dev/null; exit 0; }
-mv "$T" "$EVENTS_DIR/$(date +%s)-$2-$1-$PPID-$SUFFIX.json" || { rm -f "$T" 2>/dev/null; exit 0; }
+mv "$T" "$EVENTS_DIR/$2-$1-$PPID-$SUFFIX.json" || { rm -f "$T" 2>/dev/null; exit 0; }

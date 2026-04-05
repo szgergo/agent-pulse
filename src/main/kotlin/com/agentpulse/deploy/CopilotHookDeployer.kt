@@ -57,7 +57,7 @@ class CopilotHookDeployer : HookDeployer {
                     putJsonArray(event) {
                         addJsonObject {
                             put("type", "command")
-                            put("bash", "\$HOME/.agent-pulse/hooks/report-copilot.sh $event")
+                            put("bash", "\"\$HOME/.agent-pulse/hooks/report-copilot.sh\" $event")
                         }
                     }
                 }

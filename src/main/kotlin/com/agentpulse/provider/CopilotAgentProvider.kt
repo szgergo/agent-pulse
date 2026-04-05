@@ -102,7 +102,7 @@ abstract class CopilotAgentProvider : AgentProvider {
             id = "${agentType.name}_${sessionId ?: event.pid}",
             name = "${agentType.displayName} — ${sessionId?.take(8) ?: "PID ${event.pid}"}",
             agentType = agentType,
-            status = AgentStatus.Running,
+            status = AgentStatus.Stopped,
             pid = event.pid,
             sessionId = sessionId,
             eventCount = 1,

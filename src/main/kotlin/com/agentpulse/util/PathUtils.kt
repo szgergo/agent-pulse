@@ -1,5 +1,6 @@
 package com.agentpulse.util
 
+import java.nio.file.InvalidPathException
 import java.nio.file.Path
 
 /**
@@ -11,13 +12,20 @@ import java.nio.file.Path
  * @param envVar the environment variable name to check (e.g. "COPILOT_HOME"), or null if N/A.
  * @param defaultPath the fallback relative to user.home (e.g. ".copilot").
  */
-fun agentConfigDir(envVar: String?, defaultPath: String): Path =
-    envVar
-        ?.let(System::getenv)
-        ?.trim()
-        ?.takeIf(String::isNotBlank)
-        ?.let(Path::of)
-        ?: Path.of(System.getProperty("user.home"), defaultPath)
+fun agentConfigDir(envVar: String?, defaultPath: String): Path {
+    val default = Path.of(System.getProperty("user.home"), defaultPath)
+    return try {
+        envVar
+            ?.let(System::getenv)
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?.let(Path::of)
+            ?: default
+    } catch (_: InvalidPathException) {
+        System.err.println("[agent-pulse] Malformed path in env var $envVar — using default: $default")
+        default
+    }
+}
 
 /**
  * agent-pulse base directory: `~/.agent-pulse`.

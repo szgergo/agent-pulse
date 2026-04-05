@@ -64,7 +64,7 @@
   T=$(mktemp "$EVENTS_DIR/.tmp.XXXXXX") || exit 0
   SUFFIX=${T##*.tmp.}
   cat > "$T" || { rm -f "$T" 2>/dev/null; exit 0; }
-  mv "$T" "$EVENTS_DIR/$(date +%s)-${AGENT_TYPE}-$1-$PPID-$SUFFIX.json" || { rm -f "$T" 2>/dev/null; exit 0; }
+  mv "$T" "$EVENTS_DIR/${AGENT_TYPE}-$1-$PPID-$SUFFIX.json" || { rm -f "$T" 2>/dev/null; exit 0; }
   EOF
   chmod +x "$HOME/.agent-pulse/hooks/report-copilot.sh"
   ```
@@ -185,7 +185,7 @@
   T=$(mktemp "$EVENTS_DIR/.tmp.XXXXXX") || exit 0
   SUFFIX=${T##*.tmp.}
   cat > "$T" || { rm -f "$T" 2>/dev/null; exit 0; }
-  mv "$T" "$EVENTS_DIR/$(date +%s)-${AGENT_TYPE}-$1-$PPID-$SUFFIX.json" || { rm -f "$T" 2>/dev/null; exit 0; }
+  mv "$T" "$EVENTS_DIR/${AGENT_TYPE}-$1-$PPID-$SUFFIX.json" || { rm -f "$T" 2>/dev/null; exit 0; }
   EOF
   chmod +x src/main/resources/hooks/report-copilot.sh
   git add src/main/resources/hooks/report-copilot.sh

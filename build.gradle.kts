@@ -11,6 +11,9 @@ plugins {
 group = "com.agentpulse"
 version = "0.1.0"
 
+val kotlinxSerializationVersion: String by project
+val kotlinxCoroutinesVersion: String by project
+
 kotlin {
     jvmToolchain {
         languageVersion.set(JavaLanguageVersion.of(21))
@@ -29,11 +32,11 @@ dependencies {
     implementation(compose.components.resources)
 
     // JSON parsing (hook event payloads)
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:$kotlinxSerializationVersion")
 
     // Coroutines (background FileWatch, state flow)
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:$kotlinxCoroutinesVersion")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:$kotlinxCoroutinesVersion")
 }
 
 compose.desktop {

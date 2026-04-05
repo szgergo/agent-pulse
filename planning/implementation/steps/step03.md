@@ -29,7 +29,7 @@
 ```
 Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   → HookEventWatcher detects ENTRY_CREATE via WatchService
-  → Parses filename: <timestamp>-<agent>-<eventType>-<ppid>-<suffix>.json
+  → Parses filename: <agent>-<eventType>-<ppid>-<suffix>.json (timestamp from lastModifiedTime)
   → Reads file content and deserializes to typed HookPayload based on agent
   → Creates HookEvent(agent, eventType, pid, timestamp, payload)
   → AgentSessionManager.onEvent(event)
@@ -107,7 +107,7 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   - Uses blocking `take()` (not `poll()`) — blocks natively on `LinkedBlockingDeque`, zero CPU when idle
   - Wrapped in `runInterruptible(Dispatchers.IO)` for clean coroutine cancellation
   - No debounce needed — FSEvents coalesces events at kernel level
-  - On new file: parse filename `<timestamp>-<agent>-<eventType>-<ppid>-<suffix>.json`
+  - On new file: parse filename `<agent>-<eventType>-<ppid>-<suffix>.json`, read `lastModifiedTime` for timestamp
   - Read file content and deserialize to typed `HookPayload` via `kotlinx.serialization.json.Json`
   - Create `HookEvent(agent, eventType, pid, timestamp, payload)`
   - Call `AgentSessionManager.onEvent(event)`
@@ -530,7 +530,7 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   - HookEventWatcher: JBR native FSEvents WatchService on ~/.agent-pulse/events/
   - Uses take() (blocking, zero CPU) + SensitivityWatchEventModifier.HIGH (100ms)
   - No polling, no debounce — FSEvents coalesces at kernel level
-  - Filename parsing: <timestamp>-<agent>-<eventType>-<ppid>-<suffix>.json
+  - Filename parsing: <agent>-<eventType>-<ppid>-<suffix>.json (timestamp from lastModifiedTime)
   - Startup recovery: group by (agent, pid), process only latest, delete stale
   - PID validation every 5s with synthetic sessionEnd
   - .tmp. file exclusion, cleanup after processing

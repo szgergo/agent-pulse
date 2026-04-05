@@ -549,23 +549,30 @@
   FileWatcher's catch block. Add `runCatching` so a single broken provider never crashes the event loop:
 
   ```kotlin
-  // In AgentSessionManager.kt — replace the direct call with runCatching
+  // In AgentSessionManager.kt — add runCatching around the provider call
   fun onEvent(event: HookEvent) {
       val provider = providerMap[event.agent] ?: return
-      val currentAgentStates = _mutableAgentList.value
-      val existingState = currentAgentStates.find { it.agentType == event.agent && it.pid == event.pid }
+      val sessions = _mutableAgentList.value
+      val existingSession = sessions.find { it.agentType == event.agent && it.pid == event.pid }
 
-      val newState = runCatching {
-          provider.reconcileAgentState(event, existingState)
+      val updatedSession = runCatching {
+          provider.reconcileAgentState(event, existingSession)
       }.getOrElse { e ->
           System.err.println("[agent-pulse] ${event.agent.name} provider failed on ${event.eventType}: ${e.message}")
           return  // keep previous state, don't crash
       }
 
-      _mutableAgentList.value = if (existingState != null) {
-          currentAgentStates.map { if (it.id == newState.id) newState else it }
+      if (updatedSession.status in TERMINAL_STATUSES) {
+          if (existingSession != null) {
+              _mutableAgentList.value = sessions.filter { it.id != updatedSession.id }
+          }
+          return
+      }
+
+      _mutableAgentList.value = if (existingSession != null) {
+          sessions.map { if (it.id == updatedSession.id) updatedSession else it }
       } else {
-          currentAgentStates + newState
+          sessions + updatedSession
       }
   }
   ```

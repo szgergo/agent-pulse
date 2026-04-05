@@ -11,16 +11,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
@@ -34,7 +28,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -56,13 +49,10 @@ import com.agentpulse.provider.GeminiProvider
 import com.agentpulse.watcher.HookEventWatcher
 import java.awt.GraphicsEnvironment
 import java.awt.MouseInfo
+import java.awt.Desktop
 import java.awt.event.WindowEvent
 import java.awt.event.WindowFocusListener
-import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.painterResource
-import kotlin.time.Duration.Companion.milliseconds
-
-private val SPINNER = charArrayOf('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
 
 private val CaliforniaNight = Color(0xFF0D1321)
 private val CaliforniaCard = Color(0xFF1D2D44)
@@ -81,24 +71,6 @@ private val californiaVibesScheme = darkColorScheme(
     onBackground = Color.White,
     onSurface = Color.White,
     onSurfaceVariant = CaliforniaSand,
-)
-
-enum class AgentStatus { ONLINE, BUSY, STARTING, OFFLINE }
-
-data class Agent(
-    val name: String,
-    val status: AgentStatus,
-    val task: String,
-    val duration: String = "",
-    val tokensIn: String = "",
-    val tokensOut: String = "",
-)
-
-val dummyAgents = listOf(
-    Agent("Copilot Agent", AgentStatus.ONLINE, "waiting for assignment", "1h 23m"),
-    Agent("Aider Agent", AgentStatus.BUSY, "Implementing dummy auth", "4 min", "102k", "38k"),
-    Agent("Claude Code", AgentStatus.STARTING, "Refactor payment module", "12 sec", "1.2k"),
-    Agent("Cursor Agent", AgentStatus.OFFLINE, "Fix CSS layout"),
 )
 
 fun main() {
@@ -127,18 +99,8 @@ fun main() {
     // stateManager.agents is available for Step 5 to observe
     application {
         var isVisible by remember { mutableStateOf(false) }
-        var spinnerIndex by remember { mutableStateOf(0) }
         val popupWidthPx = 360
         val popupHeightPx = 440
-
-        LaunchedEffect(Unit) {
-            while (true) {
-                delay(100.milliseconds)
-                spinnerIndex = (spinnerIndex + 1) % SPINNER.size
-            }
-        }
-
-        val spinner = SPINNER[spinnerIndex]
 
         val windowState = rememberWindowState(
             size = DpSize(popupWidthPx.dp, popupHeightPx.dp),
@@ -167,7 +129,6 @@ fun main() {
             },
         )
 
-
         if (isVisible) {
             Window(
                 onCloseRequest = { isVisible = false },
@@ -178,8 +139,6 @@ fun main() {
                 alwaysOnTop = true,
                 transparent = true,
             ) {
-                // Close the popup when the user clicks outside it (focus loss).
-                // This mirrors macOS menu bar app behaviour (e.g. Stats, Bartender).
                 LaunchedEffect(Unit) {
                     window.addWindowFocusListener(object : WindowFocusListener {
                         override fun windowGainedFocus(e: WindowEvent) {}
@@ -187,134 +146,66 @@ fun main() {
                             isVisible = false
                         }
                     })
+                    acquireWindowFocus(window)
                 }
-                MaterialTheme(colorScheme = californiaVibesScheme) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(MaterialTheme.colorScheme.background)
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            val quitInteraction = remember { MutableInteractionSource() }
-                            val isQuitHovered by quitInteraction.collectIsHoveredAsState()
-                            val quitButtonColor by animateColorAsState(
-                                targetValue = if (isQuitHovered) CaliforniaSunset.copy(alpha = 0.38f)
-                                else CaliforniaCard.copy(alpha = 0.72f),
-                                label = "quitButtonHover"
-                            )
-
-                            // Header with title and Quit button
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    "🫀 agent-pulse",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                )
-                                Spacer(Modifier.weight(1f))
-                                Button(
-                                    onClick = { exitApplication() },
-                                    shape = RoundedCornerShape(percent = 50),
-                                    interactionSource = quitInteraction,
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = quitButtonColor,
-                                        contentColor = Color.White,
-                                    ),
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                                ) {
-                                    Text("Quit", fontSize = 12.sp)
-                                }
-                            }
-                            Text(
-                                "${dummyAgents.count { it.status == AgentStatus.ONLINE || it.status == AgentStatus.BUSY }} of ${dummyAgents.size} agents active",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Spacer(Modifier.height(16.dp))
-
-                            dummyAgents.forEach { agent ->
-                                AgentCard(agent, spinner)
-                                Spacer(Modifier.height(8.dp))
-                            }
-                        }
-                    }
-                }
+                PopupContent(onQuit = { exitApplication() })
             }
         }
     }
 }
 
-@Composable
-fun AgentCard(agent: Agent, spinner: Char) {
-    val statusColor = when (agent.status) {
-        AgentStatus.ONLINE -> Color(0xFF4CAF50)
-        AgentStatus.BUSY -> Color(0xFF2196F3)
-        AgentStatus.STARTING -> Color(0xFFFFC107)
-        AgentStatus.OFFLINE -> Color(0xFF757575)
+// On macOS, a tray-opened window does not automatically become the active application —
+// so we must steal focus explicitly before WindowFocusListener can fire windowLostFocus.
+private fun acquireWindowFocus(window: java.awt.Window) {
+    window.toFront()
+    if (Desktop.isDesktopSupported()) {
+        val desktop = Desktop.getDesktop()
+        if (desktop.isSupported(Desktop.Action.APP_REQUEST_FOREGROUND)) {
+            desktop.requestForeground(true)
+        }
     }
+    window.requestFocus()
+}
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        ),
-        shape = RoundedCornerShape(8.dp),
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(statusColor)
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    agent.name,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color.White,
-                )
-                Spacer(Modifier.weight(1f))
-                Text(
-                    if (agent.status == AgentStatus.BUSY) "$spinner ${agent.status.name.lowercase()}"
-                    else agent.status.name.lowercase(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = statusColor,
-                    fontFamily = FontFamily.Monospace,
-                )
-            }
-
-            Spacer(Modifier.height(4.dp))
-            Text(
-                agent.task,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
-            if (agent.duration.isNotEmpty() || agent.tokensIn.isNotEmpty()) {
-                Spacer(Modifier.height(4.dp))
-                Row {
-                    if (agent.duration.isNotEmpty()) {
-                        Text(
-                            "⏱ ${agent.duration}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 10.sp,
-                        )
-                    }
-                    if (agent.tokensIn.isNotEmpty()) {
-                        Spacer(Modifier.width(12.dp))
-                        Text(
-                            "↑${agent.tokensIn}" + if (agent.tokensOut.isNotEmpty()) "  ↓${agent.tokensOut}" else "",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 10.sp,
-                        )
+@Composable
+private fun PopupContent(onQuit: () -> Unit) {
+    val quitInteraction = remember { MutableInteractionSource() }
+    val isQuitHovered by quitInteraction.collectIsHoveredAsState()
+    val quitButtonColor by animateColorAsState(
+        targetValue = if (isQuitHovered) CaliforniaSunset.copy(alpha = 0.38f)
+        else CaliforniaCard.copy(alpha = 0.72f),
+        label = "quitButtonHover"
+    )
+    MaterialTheme(colorScheme = californiaVibesScheme) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(16.dp))
+                .background(MaterialTheme.colorScheme.background)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "🫀 agent-pulse",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Button(
+                        onClick = onQuit,
+                        shape = RoundedCornerShape(percent = 50),
+                        interactionSource = quitInteraction,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = quitButtonColor,
+                            contentColor = Color.White,
+                        ),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    ) {
+                        Text("Quit", fontSize = 12.sp)
                     }
                 }
             }

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Copilot hook — detects copilot-cli / copilot-vscode / copilot-intellij via $PPID inspection.
 # MUST always exit 0 — failure must never block the Copilot session.
-trap 'exit 0' ERR
+trap 'exit 0' EXIT
 
 EVENTS_DIR="$HOME/.agent-pulse/events"
 mkdir -p "$EVENTS_DIR" || exit 0
@@ -29,5 +29,6 @@ else
 fi
 
 T=$(mktemp "$EVENTS_DIR/.tmp.XXXXXX") || exit 0
+SUFFIX=${T##*.tmp.}
 cat > "$T" || { rm -f "$T" 2>/dev/null; exit 0; }
-mv "$T" "$EVENTS_DIR/$(date +%s)-${AGENT_TYPE}-$1-$PPID.json" || { rm -f "$T" 2>/dev/null; exit 0; }
+mv "$T" "$EVENTS_DIR/$(date +%s)-${AGENT_TYPE}-$1-$PPID-$SUFFIX.json" || { rm -f "$T" 2>/dev/null; exit 0; }

@@ -6,6 +6,7 @@ import com.agentpulse.model.CopilotPayload
 import com.agentpulse.model.HookEvent
 import com.agentpulse.model.HookEventType
 import com.agentpulse.util.agentConfigDir
+import java.nio.file.InvalidPathException
 import java.nio.file.Path
 import kotlin.io.path.exists
 import kotlin.io.path.isDirectory
@@ -31,26 +32,38 @@ abstract class CopilotAgentProvider : AgentProvider {
     private fun incrementCounter(extra: Map<String, String>, key: String): String =
         ((extra[key]?.toIntOrNull() ?: 0) + 1).toString()
 
+    private fun safeParseCwd(raw: String?): Path? = try {
+        raw?.let { Path.of(it) }
+    } catch (_: InvalidPathException) {
+        null
+    }
+
     override fun reconcileAgentState(event: HookEvent, currentState: AgentState?): AgentState {
-        val p = event.payload as? CopilotPayload ?: return fallbackState(event)
+        val p = event.payload as? CopilotPayload ?: return currentState ?: fallbackState(event)
         val sessionId = resolveSessionId(event.pid)
         return when (event.eventType) {
-            HookEventType.SessionStart -> AgentState(
-                id = "${agentType.name}_${sessionId ?: event.pid}",
-                name = "${agentType.displayName} — ${sessionId?.take(8) ?: "PID ${event.pid}"}",
-                agentType = agentType,
-                status = AgentStatus.Running,
-                pid = event.pid,
-                sessionId = sessionId,
-                cwd = p.cwd?.let { Path.of(it) },
-                eventCount = 1,
-                lastActivity = event.timestamp,
-            )
+            HookEventType.SessionStart -> {
+                if (sessionId == null) {
+                    System.err.println("[agent-pulse] ${agentType.name} sessionStart with no session ID for PID ${event.pid} — ignoring")
+                    return currentState ?: fallbackState(event)
+                }
+                AgentState(
+                    id = "${agentType.name}_$sessionId",
+                    name = "${agentType.displayName} — ${sessionId.take(8)}",
+                    agentType = agentType,
+                    status = AgentStatus.Running,
+                    pid = event.pid,
+                    sessionId = sessionId,
+                    cwd = safeParseCwd(p.cwd),
+                    eventCount = 1,
+                    lastActivity = event.timestamp,
+                )
+            }
             HookEventType.SessionEnd -> currentState?.copy(
                 status = AgentStatus.Stopped,
                 eventCount = currentState.eventCount + 1,
                 lastActivity = event.timestamp,
-            ) ?: fallbackState(event)
+            ) ?: fallbackState(event).copy(status = AgentStatus.Stopped)
             HookEventType.PostToolUse -> {
                 val toolName = p.toolName
                 currentState?.copy(

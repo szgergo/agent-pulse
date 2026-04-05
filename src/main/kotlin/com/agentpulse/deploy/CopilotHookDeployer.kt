@@ -11,7 +11,7 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import kotlin.io.path.createDirectories
-import kotlin.io.path.exists
+import kotlin.io.path.isDirectory
 import kotlin.io.path.outputStream
 import kotlin.io.path.writeText
 
@@ -39,8 +39,8 @@ class CopilotHookDeployer : HookDeployer {
 
         // Step 2: write agent-pulse.json to Copilot hooks directory
         val copilotHomeDir = agentConfigDir("COPILOT_HOME", ".copilot")
-        if (!copilotHomeDir.exists()) {
-            println("[agent-pulse] Copilot home not found at $copilotHomeDir — skipping hook deployment")
+        if (!copilotHomeDir.isDirectory()) {
+            println("[agent-pulse] Copilot home not found or not a directory at $copilotHomeDir — skipping hook deployment")
             return
         }
         // Copilot merges all *.json files from its hooks dir, so agent-pulse.json coexists

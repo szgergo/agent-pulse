@@ -190,7 +190,33 @@
   git commit -m "chore: add report-copilot.sh as classpath resource for HookDeployer"
   ```
 
-- [ ] **4.2 Automate deployment (`CopilotHookDeployer`)**
+- [ ] **4.2a Create `agentConfigDir()` utility function**
+
+  The `agentConfigDir` helper is defined in shared-context.md but has never been implemented in
+  source code. Both CopilotHookDeployer (4.2b) and CopilotAgentProvider (4.3) depend on it.
+  Create it as a top-level function in a new file:
+
+  ```kotlin
+  // File: src/main/kotlin/com/agentpulse/util/PathUtils.kt
+  package com.agentpulse.util
+
+  import java.nio.file.Path
+
+  /**
+   * Resolve an agent's config directory, respecting env-var overrides.
+   *
+   * Every agent lets users relocate their config via an env var (e.g. COPILOT_HOME).
+   * Hardcoding the default path misses sessions for users who set these vars.
+   *
+   * @param envVar the environment variable name to check (e.g. "COPILOT_HOME"), or null if N/A.
+   * @param defaultPath the fallback relative to user.home (e.g. ".copilot").
+   */
+  fun agentConfigDir(envVar: String?, defaultPath: String): Path =
+      System.getenv(envVar)?.let { Path.of(it) }
+          ?: Path.of(System.getProperty("user.home"), defaultPath)
+  ```
+
+- [ ] **4.2b Automate deployment (`CopilotHookDeployer`)**
 
   Create `CopilotHookDeployer : HookDeployer` in `deploy/CopilotHookDeployer.kt`.
   Now that `report-copilot.sh` is a committed classpath resource, this deployer handles
@@ -205,9 +231,25 @@
   - Deploy the script first, then the config (same order as the PoC)
 
   ```kotlin
-  // In deploy/CopilotHookDeployer.kt
+  // File: src/main/kotlin/com/agentpulse/deploy/CopilotHookDeployer.kt
+  package com.agentpulse.deploy
+
+  import com.agentpulse.util.agentConfigDir
+  import kotlinx.serialization.encodeToString
+  import kotlinx.serialization.json.Json
+  import kotlinx.serialization.json.JsonElement
+  import kotlinx.serialization.json.buildJsonObject
+  import kotlinx.serialization.json.put
+  import kotlinx.serialization.json.putJsonArray
+  import kotlinx.serialization.json.putJsonObject
+  import java.nio.file.Path
+  import kotlin.io.path.createDirectories
+  import kotlin.io.path.exists
+  import kotlin.io.path.outputStream
+  import kotlin.io.path.writeText
+
   // Implements HookDeployer interface — registered in the deployers list in Main.kt.
-  // Uses agentConfigDir() helper from shared-context.md — all agent paths go through this.
+  // Uses agentConfigDir() helper from util/PathUtils.kt — all agent paths go through this.
   // See: https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference
   //
   // Threading: all deployers are launched in parallel on Dispatchers.IO from main().
@@ -215,47 +257,47 @@
 
   class CopilotHookDeployer : HookDeployer {
       override fun deployAgentHook() {
-      // Step 1: deploy report-copilot.sh from classpath resource
-      val agentPulseHooksDir = Path.of(System.getProperty("user.home"), ".agent-pulse", "hooks")
-      agentPulseHooksDir.createDirectories()
-      val scriptDest = agentPulseHooksDir.resolve("report-copilot.sh")
-      javaClass.getResourceAsStream("/hooks/report-copilot.sh")!!.use { input ->
-          scriptDest.outputStream().use { output -> input.copyTo(output) }
-      }
-      scriptDest.toFile().setExecutable(true, false)
+          // Step 1: deploy report-copilot.sh from classpath resource
+          val agentPulseHooksDir = Path.of(System.getProperty("user.home"), ".agent-pulse", "hooks")
+          agentPulseHooksDir.createDirectories()
+          val scriptDest = agentPulseHooksDir.resolve("report-copilot.sh")
+          javaClass.getResourceAsStream("/hooks/report-copilot.sh")!!.use { input ->
+              scriptDest.outputStream().use { output -> input.copyTo(output) }
+          }
+          scriptDest.toFile().setExecutable(true, false)
 
-      // Step 2: write agent-pulse.json to Copilot hooks directory
-      val copilotHomeDir = agentConfigDir("COPILOT_HOME", ".copilot")
-      if (!copilotHomeDir.exists()) {
-          println("[agent-pulse] Copilot home not found at $copilotHomeDir — skipping hook deployment")
-          return
-      }
-      // Copilot merges all *.json files from its hooks dir, so agent-pulse.json coexists
-      // safely alongside any user-defined hook configs. We only write our own file.
-      val copilotHooksDir = copilotHomeDir.resolve("hooks")
-      copilotHooksDir.createDirectories()  // safe: only creates 'hooks' subdir; parent already confirmed
+          // Step 2: write agent-pulse.json to Copilot hooks directory
+          val copilotHomeDir = agentConfigDir("COPILOT_HOME", ".copilot")
+          if (!copilotHomeDir.exists()) {
+              println("[agent-pulse] Copilot home not found at $copilotHomeDir — skipping hook deployment")
+              return
+          }
+          // Copilot merges all *.json files from its hooks dir, so agent-pulse.json coexists
+          // safely alongside any user-defined hook configs. We only write our own file.
+          val copilotHooksDir = copilotHomeDir.resolve("hooks")
+          copilotHooksDir.createDirectories()  // safe: only creates 'hooks' subdir; parent already confirmed
 
-      val hookConfig = copilotHooksDir.resolve("agent-pulse.json")
-      val events = listOf("sessionStart", "sessionEnd", "postToolUse", "userPromptSubmitted", "subagentStart")
-      val configJson = buildJsonObject {
-          put("version", 1)
-          putJsonObject("hooks") {
-              for (event in events) {
-                  putJsonArray(event) {
-                      addJsonObject {
-                          put("type", "command")
-                          put("bash", "\$HOME/.agent-pulse/hooks/report-copilot.sh $event")
+          val hookConfig = copilotHooksDir.resolve("agent-pulse.json")
+          val events = listOf("sessionStart", "sessionEnd", "postToolUse", "userPromptSubmitted", "subagentStart")
+          val configJson = buildJsonObject {
+              put("version", 1)
+              putJsonObject("hooks") {
+                  for (event in events) {
+                      putJsonArray(event) {
+                          addJsonObject {
+                              put("type", "command")
+                              put("bash", "\$HOME/.agent-pulse/hooks/report-copilot.sh $event")
+                          }
                       }
                   }
               }
           }
-      }
-      hookConfig.writeText(Json { prettyPrint = true }.encodeToString(configJson))
+          hookConfig.writeText(Json { prettyPrint = true }.encodeToString<JsonElement>(configJson))
       }
   }
   ```
 
-  **Main.kt registration** — add to the deployers list:
+  **Main.kt registration** — add `CopilotHookDeployer()` to the existing deployers list:
   ```kotlin
   val deployers: List<HookDeployer> = listOf(
       AgentPulseHookDeployer(),
@@ -277,7 +319,23 @@
 
   **`CopilotAgentProvider.kt` — abstract base with Copilot session logic:**
 
+  Create a new file `src/main/kotlin/com/agentpulse/provider/CopilotAgentProvider.kt`:
+
   ```kotlin
+  // File: src/main/kotlin/com/agentpulse/provider/CopilotAgentProvider.kt
+  package com.agentpulse.provider
+
+  import com.agentpulse.model.AgentState
+  import com.agentpulse.model.AgentStatus
+  import com.agentpulse.model.CopilotPayload
+  import com.agentpulse.model.HookEvent
+  import com.agentpulse.model.HookEventType
+  import com.agentpulse.util.agentConfigDir
+  import java.nio.file.Path
+  import kotlin.io.path.exists
+  import kotlin.io.path.isDirectory
+  import kotlin.io.path.listDirectoryEntries
+
   abstract class CopilotAgentProvider : AgentProvider {
 
       // Copilot-specific: scan $COPILOT_HOME/session-state/ for inuse.<PID>.lock files.
@@ -363,39 +421,77 @@
   }
   ```
 
-  Three minimal concrete classes, each in its own file:
+  **Modify the three existing Copilot provider stubs to extend `CopilotAgentProvider`:**
+
+  The files `CopilotCliProvider.kt`, `CopilotVsCodeProvider.kt`, and `CopilotIntelliJProvider.kt`
+  already exist in `src/main/kotlin/com/agentpulse/provider/` as stubs that directly implement
+  `AgentProvider`. Replace each file's content to extend `CopilotAgentProvider()` instead — they
+  inherit `reconcileAgentState()`, `resolveSessionId()`, and `fallbackState()` from the abstract base.
+  Remove the old stub `reconcileAgentState()` override and imports that are no longer needed.
 
   ```kotlin
-  // CopilotCliProvider.kt
+  // File: src/main/kotlin/com/agentpulse/provider/CopilotCliProvider.kt
+  package com.agentpulse.provider
+
+  import com.agentpulse.model.AgentType
+
   class CopilotCliProvider : CopilotAgentProvider() {
       override val agentType = AgentType.CopilotCli
   }
+  ```
 
-  // CopilotVsCodeProvider.kt
+  ```kotlin
+  // File: src/main/kotlin/com/agentpulse/provider/CopilotVsCodeProvider.kt
+  package com.agentpulse.provider
+
+  import com.agentpulse.model.AgentType
+
   class CopilotVsCodeProvider : CopilotAgentProvider() {
       override val agentType = AgentType.CopilotVsCode
   }
+  ```
 
-  // CopilotIntelliJProvider.kt
+  ```kotlin
+  // File: src/main/kotlin/com/agentpulse/provider/CopilotIntelliJProvider.kt
+  package com.agentpulse.provider
+
+  import com.agentpulse.model.AgentType
+
   class CopilotIntelliJProvider : CopilotAgentProvider() {
       override val agentType = AgentType.CopilotIntelliJ
   }
   ```
 
-  Register all three in `Main.kt`:
+  **Main.kt registration** — `CopilotCliProvider()` is already in the providers list. Add the
+  other two (`CopilotVsCodeProvider()` and `CopilotIntelliJProvider()`) that exist as files but
+  are not yet registered:
 
   ```kotlin
-  // In Main.kt — replace the single CopilotCliProvider() with all three
-  CopilotCliProvider(),
-  CopilotVsCodeProvider(),
-  CopilotIntelliJProvider(),
+  // In Main.kt — add CopilotVsCodeProvider and CopilotIntelliJProvider to the existing list
+  // (CopilotCliProvider is already registered)
+  val providers = listOf(
+      CopilotCliProvider(),
+      CopilotVsCodeProvider(),
+      CopilotIntelliJProvider(),
+      ClaudeCodeProvider(),
+      CursorProvider(),
+      CodexProvider(),
+      GeminiProvider(),
+  )
   ```
 
   > **Code changes also required in `HookEventType.kt`:**
-  > - Add `SubagentStart` (Copilot 1.0.7+) — fires in parent when sub-agent spawned
-  > - Add `PostToolUseFailure` (Copilot 1.0.15+) — fires when a tool call fails; `PostToolUse` now fires for successful calls only since 1.0.15
-  > - Add `PermissionRequest` (Copilot 1.0.16+) — fires on permission prompts
-  > - Update `Notification` comment: now also Copilot (1.0.18+, async, fires on agent completion), not just Claude
+  > - Add `SubagentStart` (Copilot 1.0.7+) — fires in parent when sub-agent spawned.
+  >   **Note:** `SubagentStart` is a different event from the existing `SubagentStop`. The hook
+  >   fires `subagentStart` (camelCase) — `fromRaw()` does case-insensitive matching so the
+  >   PascalCase enum `SubagentStart` resolves correctly. Add it in the "Agent completion" section,
+  >   next to `SubagentStop`, with comment: `/** Subagent spawned. Agents: Copilot (subagentStart, 1.0.7+). */`
+  > - Add `PostToolUseFailure` (Copilot 1.0.15+) — fires when a tool call fails; `PostToolUse` now fires for successful calls only since 1.0.15.
+  >   Add it in the "Tool execution" section, after `PostToolUse`, with comment: `/** Tool invocation failed. Agents: Copilot (postToolUseFailure, 1.0.15+). */`
+  > - Add `PermissionRequest` (Copilot 1.0.16+) — fires on permission prompts.
+  >   Add it in the "Copilot CLI specific" section, after `ErrorOccurred`, with comment: `/** Permission prompt shown. Agents: Copilot (permissionRequest, 1.0.16+). */`
+  > - Update `Notification` comment from `/** User notification triggered. Raw: 'Notification'. */` to:
+  >   `/** Notification triggered. Agents: Claude (Notification), Copilot (notification, 1.0.18+, async — fires on agent completion). */`
 
   **Hardening: `AgentStateManager.onEvent()` error isolation** (per shared-context.md §Adapter Error Isolation):
 
@@ -439,16 +535,19 @@
   git checkout -b step-4-copilot-provider
   git add -A && git commit -m "feat: Copilot hook provider — CLI, VS Code, IntelliJ
 
+  - Add agentConfigDir() utility (util/PathUtils.kt) for env-var-aware config paths
   - Bundle report-copilot.sh as classpath resource (src/main/resources/hooks/)
   - Deploy hook config to Copilot hooks dir (COPILOT_HOME or ~/.copilot)
   - resolveSessionId() in AgentProvider interface (default null); Copilot override scans session-state/
   - reconcileAgentState() + fallbackState() in CopilotAgentProvider abstract base class
-  - Three concrete Copilot providers, all registered in Main.kt
+  - Modify three existing Copilot provider stubs to extend CopilotAgentProvider
   - CopilotHookDeployer (implements HookDeployer interface) automates deployment on startup
+  - Add SubagentStart, PostToolUseFailure, PermissionRequest to HookEventType
+  - runCatching error isolation in AgentStateManager.onEvent()
 
   Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
   git push -u origin step-4-copilot-provider
   gh pr create --title "Step 4: Copilot hook provider (CLI, VS Code, IntelliJ)" \
-    --body "PoC-verified hook wiring. report-copilot.sh with two-level PPID detection, resolveSessionId() in AgentProvider interface, CopilotAgentProvider abstract base, three providers registered in Main.kt." \
+    --body "PoC-verified hook wiring. report-copilot.sh with two-level PPID detection, agentConfigDir utility, resolveSessionId() in AgentProvider interface, CopilotAgentProvider abstract base, three existing provider stubs modified, HookEventType additions, runCatching error isolation." \
     --base main
   ```

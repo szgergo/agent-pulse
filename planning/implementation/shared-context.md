@@ -495,19 +495,24 @@ agent-pulse/
 │   │   │   ├── HookEvent.kt
 │   │   │   └── HookEventType.kt
 │   │   ├── provider/
-│   │   │   ├── AgentProvider.kt
-│   │   │   ├── AgentStateManager.kt
-│   │   │   ├── CopilotCliProvider.kt       (Step 4)
-│   │   │   ├── ClaudeCodeProvider.kt       (Step 6)
-│   │   │   ├── CursorProvider.kt           (Step 7)
-│   │   │   ├── CodexProvider.kt            (Step 8)
-│   │   │   └── GeminiProvider.kt           (Step 8)
+│   │   │   ├── AgentProvider.kt              (Step 3 — interface)
+│   │   │   ├── AgentStateManager.kt          (Step 3)
+│   │   │   ├── CopilotAgentProvider.kt       (Step 4 — abstract base)
+│   │   │   ├── CopilotCliProvider.kt         (Step 4)
+│   │   │   ├── CopilotVsCodeProvider.kt      (Step 4)
+│   │   │   ├── CopilotIntelliJProvider.kt    (Step 4)
+│   │   │   ├── ClaudeCodeProvider.kt         (Step 6)
+│   │   │   ├── CursorProvider.kt             (Step 7)
+│   │   │   ├── CodexProvider.kt              (Step 8)
+│   │   │   └── GeminiProvider.kt             (Step 8)
 │   │   ├── watcher/
 │   │   │   └── HookEventWatcher.kt         (Step 3)
 │   │   ├── deploy/
 │   │   │   ├── HookDeployer.kt             (Step 3 — interface)
 │   │   │   ├── AgentPulseHookDeployer.kt   (Step 3 — shared infra)
 │   │   │   └── CopilotHookDeployer.kt      (Step 4)
+│   │   ├── util/
+│   │   │   └── PathUtils.kt               (Step 4 — agentConfigDir helper)
 │   │   ├── otlp/
 │   │   │   └── OtlpReceiver.kt            (Step 9, POST-MVP)
 │   │   ├── ui/

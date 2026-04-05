@@ -511,15 +511,17 @@
 
   **Main.kt registration** — `CopilotCliProvider()` is already in the providers list. Add the
   other two (`CopilotVsCodeProvider()` and `CopilotIntelliJProvider()`) that exist as files but
-  are not yet registered:
+  are not yet registered. Group all three Copilot variants into a named list first, then combine
+  with the other providers:
 
   ```kotlin
-  // In Main.kt — add CopilotVsCodeProvider and CopilotIntelliJProvider to the existing list
-  // (CopilotCliProvider is already registered)
-  val providers = listOf(
+  // In Main.kt — group Copilot variants, then combine with other providers
+  val copilotProviders = listOf(
       CopilotCliProvider(),
       CopilotVsCodeProvider(),
       CopilotIntelliJProvider(),
+  )
+  val providers = copilotProviders + listOf(
       ClaudeCodeProvider(),
       CursorProvider(),
       CodexProvider(),

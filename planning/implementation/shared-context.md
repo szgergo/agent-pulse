@@ -657,7 +657,7 @@ sessions for users who set these vars.
 default. Use a helper:
 ```kotlin
 fun agentConfigDir(envVar: String?, defaultPath: String): Path =
-    System.getenv(envVar)?.let { Path.of(it) } ?: Path.of(System.getProperty("user.home"), defaultPath)
+    envVar?.let(System::getenv)?.let(Path::of) ?: Path.of(System.getProperty("user.home"), defaultPath)
 ```
 
 ### 🟡 Adapter Error Isolation

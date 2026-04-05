@@ -213,7 +213,7 @@
    * @param defaultPath the fallback relative to user.home (e.g. ".copilot").
    */
   fun agentConfigDir(envVar: String?, defaultPath: String): Path =
-      System.getenv(envVar)?.let { Path.of(it) }
+      envVar?.let(System::getenv)?.let(Path::of)
           ?: Path.of(System.getProperty("user.home"), defaultPath)
 
   /**

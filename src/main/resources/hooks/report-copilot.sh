@@ -5,7 +5,7 @@ trap 'exit 0' ERR
 
 EVENTS_DIR="$HOME/.agent-pulse/events"
 mkdir -p "$EVENTS_DIR" || exit 0
-[ "$(find "$EVENTS_DIR" -name '*.json' -maxdepth 1 | head -1001 | wc -l)" -gt 1000 ] && exit 0
+[ "$(find "$EVENTS_DIR" -maxdepth 1 -name '*.json' | head -1001 | wc -l)" -gt 1000 ] && exit 0
 
 # Two-level process tree detection:
 #   $PPID  = direct parent (the agent process that spawned this hook)

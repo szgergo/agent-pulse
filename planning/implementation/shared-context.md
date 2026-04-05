@@ -436,7 +436,7 @@ Branch naming: `step-1-scaffold`, `step-2-data-model`, `step-3-detection`, `step
 │  │     On startup: group queued files by (agent, pid), process      │ │
 │  │                 only latest per group, delete stale ones          │ │
 │  │     On ENTRY_CREATE:                                              │ │
-│  │       Parse filename → agent, event, PID, timestamp               │ │
+│  │       Parse filename → agent, event, PID (timestamp from mtime)   │ │
 │  │       Read file → raw event JSON                                  │ │
 │  │       Resolve session ID (per-agent Kotlin logic)                 │ │
 │  │       Update StateFlow<List<Agent>>                               │ │
@@ -602,7 +602,7 @@ Key research findings that shaped this plan:
 ## Notes
 
 - Hook script is 3 lines of POSIX sh — zero external dependencies
-- Filename encodes metadata: `<timestamp>-<agent>-<event>-<ppid>-<suffix>.json`
+- Filename encodes metadata: `<agent>-<event>-<ppid>-<suffix>.json` (no epoch prefix — timestamp comes from `lastModifiedTime`, ms precision)
 - Session ID resolution happens in Kotlin, not in the hook script
 - On first run, user must restart agent sessions after hook deployment
 - Global hotkey uses JNA + Carbon `RegisterEventHotKey` (same as JetBrains Toolbox) — no Accessibility permission needed

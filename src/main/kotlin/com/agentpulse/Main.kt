@@ -56,6 +56,8 @@ import com.agentpulse.provider.GeminiProvider
 import com.agentpulse.watcher.HookEventWatcher
 import java.awt.GraphicsEnvironment
 import java.awt.MouseInfo
+import java.awt.event.WindowEvent
+import java.awt.event.WindowFocusListener
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.painterResource
 import kotlin.time.Duration.Companion.milliseconds
@@ -176,6 +178,16 @@ fun main() {
                 alwaysOnTop = true,
                 transparent = true,
             ) {
+                // Close the popup when the user clicks outside it (focus loss).
+                // This mirrors macOS menu bar app behaviour (e.g. Stats, Bartender).
+                LaunchedEffect(Unit) {
+                    window.addWindowFocusListener(object : WindowFocusListener {
+                        override fun windowGainedFocus(e: WindowEvent) {}
+                        override fun windowLostFocus(e: WindowEvent) {
+                            isVisible = false
+                        }
+                    })
+                }
                 MaterialTheme(colorScheme = californiaVibesScheme) {
                     Box(
                         modifier = Modifier

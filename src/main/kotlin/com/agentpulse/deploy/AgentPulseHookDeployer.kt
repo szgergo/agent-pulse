@@ -16,9 +16,8 @@ import kotlin.io.path.writeText
  *
  * Skips deployment if config.json already records hooksDeployed = true.
  */
-class AgentPulseHookDeployer(
-    private val baseDir: Path = Path.of(System.getProperty("user.home"), ".agent-pulse"),
-) : HookDeployer {
+class AgentPulseHookDeployer : HookDeployer {
+    private val baseDir = Path.of(System.getProperty("user.home"), ".agent-pulse")
     private val configFile = baseDir.resolve("config.json")
     private val hooksDir = baseDir.resolve("hooks")
     private val eventsDir = baseDir.resolve("events")

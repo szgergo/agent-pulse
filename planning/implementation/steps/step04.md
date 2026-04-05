@@ -192,6 +192,14 @@
   git commit -m "chore: add report-copilot.sh as classpath resource for HookDeployer"
   ```
 
+  > **📝 Implementation note — filename format changed during PR review:**
+  > The original spec used `$(date +%s)-` as an epoch prefix: `{epoch}-{agentType}-{eventType}-{pid}-{suffix}.json`.
+  > During implementation this was simplified: the epoch prefix was removed and `Files.getLastModifiedTime()`
+  > is used as the event timestamp instead. The final format is `{agentType}-{eventType}-{pid}-{suffix}.json`.
+  > Rationale: the event file is loaded anyway (for the payload), so `lastModifiedTime` is a free read with
+  > millisecond precision — strictly better than the 1-second granularity of `date +%s`. step03.md retains
+  > the original design since it is a completed step; this step's source is what counts.
+
 - [ ] **4.2a Create path utility functions (`PathUtils.kt`)**
 
   These helpers are defined in shared-context.md but have never been implemented in source code.

@@ -214,6 +214,27 @@
   fun agentConfigDir(envVar: String?, defaultPath: String): Path =
       System.getenv(envVar)?.let { Path.of(it) }
           ?: Path.of(System.getProperty("user.home"), defaultPath)
+
+  /**
+   * agent-pulse base directory: `~/.agent-pulse`.
+   * All agent-pulse data lives under this tree (hooks, events, cache, etc.).
+   */
+  fun agentPulseBaseDir(): Path =
+      Path.of(System.getProperty("user.home"), ".agent-pulse")
+
+  /**
+   * Hooks directory: `~/.agent-pulse/hooks`.
+   * Deployed hook scripts (e.g., report-copilot.sh, report-claude.sh) live here.
+   */
+  fun agentPulseHooksDir(): Path =
+      agentPulseBaseDir().resolve("hooks")
+
+  /**
+   * Events directory: `~/.agent-pulse/events`.
+   * Hook events are written here as JSON files by running hook scripts.
+   */
+  fun agentPulseEventsDir(): Path =
+      agentPulseBaseDir().resolve("events")
   ```
 
 - [ ] **4.2b Automate deployment (`CopilotHookDeployer`)**
@@ -235,6 +256,7 @@
   package com.agentpulse.deploy
 
   import com.agentpulse.util.agentConfigDir
+  import com.agentpulse.util.agentPulseHooksDir
   import kotlinx.serialization.encodeToString
   import kotlinx.serialization.json.Json
   import kotlinx.serialization.json.JsonElement
@@ -242,14 +264,13 @@
   import kotlinx.serialization.json.put
   import kotlinx.serialization.json.putJsonArray
   import kotlinx.serialization.json.putJsonObject
-  import java.nio.file.Path
   import kotlin.io.path.createDirectories
   import kotlin.io.path.exists
   import kotlin.io.path.outputStream
   import kotlin.io.path.writeText
 
   // Implements HookDeployer interface — registered in the deployers list in Main.kt.
-  // Uses agentConfigDir() helper from util/PathUtils.kt — all agent paths go through this.
+  // Uses agentConfigDir() and agentPulseHooksDir() helpers from util/PathUtils.kt.
   // See: https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference
   //
   // Threading: all deployers are launched in parallel on Dispatchers.IO from main().
@@ -258,9 +279,9 @@
   class CopilotHookDeployer : HookDeployer {
       override fun deployAgentHook() {
           // Step 1: deploy report-copilot.sh from classpath resource
-          val agentPulseHooksDir = Path.of(System.getProperty("user.home"), ".agent-pulse", "hooks")
-          agentPulseHooksDir.createDirectories()
-          val scriptDest = agentPulseHooksDir.resolve("report-copilot.sh")
+          val hooksDir = agentPulseHooksDir()
+          hooksDir.createDirectories()
+          val scriptDest = hooksDir.resolve("report-copilot.sh")
           javaClass.getResourceAsStream("/hooks/report-copilot.sh")!!.use { input ->
               scriptDest.outputStream().use { output -> input.copyTo(output) }
           }

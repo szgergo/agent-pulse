@@ -286,6 +286,7 @@
   import kotlinx.serialization.encodeToString
   import kotlinx.serialization.json.Json
   import kotlinx.serialization.json.JsonElement
+  import kotlinx.serialization.json.addJsonObject
   import kotlinx.serialization.json.buildJsonObject
   import kotlinx.serialization.json.put
   import kotlinx.serialization.json.putJsonArray
@@ -344,7 +345,10 @@
   }
   ```
 
-  **Main.kt registration** — add `CopilotHookDeployer()` to the existing deployers list:
+  **Main.kt registration** — add `CopilotHookDeployer()` to the existing deployers list and add the import:
+  ```kotlin
+  import com.agentpulse.deploy.CopilotHookDeployer
+  ```
   ```kotlin
   val deployers: List<HookDeployer> = listOf(
       AgentPulseHookDeployer(),
@@ -363,6 +367,20 @@
   // In AgentProvider.kt — add to the interface
   fun resolveSessionId(pid: Int): String? = null   // default: not supported by this provider
   ```
+
+  > **Update `HookEventType.kt` first** — `CopilotAgentProvider` references `HookEventType.SubagentStart`
+  > which does not exist yet. Make these additions before writing `CopilotAgentProvider.kt`:
+  > - Add `SubagentStart` (Copilot 1.0.7+) — fires in parent when sub-agent spawned.
+  >   **Note:** `SubagentStart` is a different event from the existing `SubagentStop`. The hook
+  >   fires `subagentStart` (camelCase) — `fromRaw()` does case-insensitive matching so the
+  >   PascalCase enum `SubagentStart` resolves correctly. Add it in the "Agent completion" section,
+  >   next to `SubagentStop`, with comment: `/** Subagent spawned. Agents: Copilot (subagentStart, 1.0.7+). */`
+  > - Add `PostToolUseFailure` (Copilot 1.0.15+) — fires when a tool call fails; `PostToolUse` now fires for successful calls only since 1.0.15.
+  >   Add it in the "Tool execution" section, after `PostToolUse`, with comment: `/** Tool invocation failed. Agents: Copilot (postToolUseFailure, 1.0.15+). */`
+  > - Add `PermissionRequest` (Copilot 1.0.16+) — fires on permission prompts.
+  >   Add it in the "Copilot CLI specific" section, after `ErrorOccurred`, with comment: `/** Permission prompt shown. Agents: Copilot (permissionRequest, 1.0.16+). */`
+  > - Update `Notification` comment from `/** User notification triggered. Raw: 'Notification'. */` to:
+  >   `/** Notification triggered. Agents: Claude (Notification), Copilot (notification, 1.0.18+, async — fires on agent completion). */`
 
   **`CopilotAgentProvider.kt` — abstract base with Copilot session logic:**
 
@@ -511,9 +529,14 @@
 
   **Main.kt registration** — `CopilotCliProvider()` is already in the providers list. Add the
   other two (`CopilotVsCodeProvider()` and `CopilotIntelliJProvider()`) that exist as files but
-  are not yet registered. Group all three Copilot variants into a named list first, then combine
-  with the other providers:
+  are not yet registered. Add the missing imports and group all three Copilot variants into a
+  named list first, then combine with the other providers:
 
+  ```kotlin
+  // In Main.kt — add these imports
+  import com.agentpulse.provider.CopilotVsCodeProvider
+  import com.agentpulse.provider.CopilotIntelliJProvider
+  ```
   ```kotlin
   // In Main.kt — group Copilot variants, then combine with other providers
   val copilotProviders = listOf(
@@ -528,19 +551,6 @@
       GeminiProvider(),
   )
   ```
-
-  > **Code changes also required in `HookEventType.kt`:**
-  > - Add `SubagentStart` (Copilot 1.0.7+) — fires in parent when sub-agent spawned.
-  >   **Note:** `SubagentStart` is a different event from the existing `SubagentStop`. The hook
-  >   fires `subagentStart` (camelCase) — `fromRaw()` does case-insensitive matching so the
-  >   PascalCase enum `SubagentStart` resolves correctly. Add it in the "Agent completion" section,
-  >   next to `SubagentStop`, with comment: `/** Subagent spawned. Agents: Copilot (subagentStart, 1.0.7+). */`
-  > - Add `PostToolUseFailure` (Copilot 1.0.15+) — fires when a tool call fails; `PostToolUse` now fires for successful calls only since 1.0.15.
-  >   Add it in the "Tool execution" section, after `PostToolUse`, with comment: `/** Tool invocation failed. Agents: Copilot (postToolUseFailure, 1.0.15+). */`
-  > - Add `PermissionRequest` (Copilot 1.0.16+) — fires on permission prompts.
-  >   Add it in the "Copilot CLI specific" section, after `ErrorOccurred`, with comment: `/** Permission prompt shown. Agents: Copilot (permissionRequest, 1.0.16+). */`
-  > - Update `Notification` comment from `/** User notification triggered. Raw: 'Notification'. */` to:
-  >   `/** Notification triggered. Agents: Claude (Notification), Copilot (notification, 1.0.18+, async — fires on agent completion). */`
 
   **Hardening: `AgentSessionManager.onEvent()` error isolation** (per shared-context.md §Adapter Error Isolation):
 

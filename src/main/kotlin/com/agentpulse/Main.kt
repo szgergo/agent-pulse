@@ -19,7 +19,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,9 +47,9 @@ import com.agentpulse.provider.CopilotCliProvider
 import com.agentpulse.provider.CursorProvider
 import com.agentpulse.provider.GeminiProvider
 import com.agentpulse.watcher.HookEventWatcher
+import java.awt.Desktop
 import java.awt.GraphicsEnvironment
 import java.awt.MouseInfo
-import java.awt.Desktop
 import java.awt.event.WindowEvent
 import java.awt.event.WindowFocusListener
 import org.jetbrains.compose.resources.painterResource
@@ -139,14 +139,18 @@ fun main() {
                 alwaysOnTop = true,
                 transparent = true,
             ) {
-                LaunchedEffect(Unit) {
-                    window.addWindowFocusListener(object : WindowFocusListener {
-                        override fun windowGainedFocus(e: WindowEvent) {}
+                DisposableEffect(window) {
+                    val listener = object : WindowFocusListener {
+                        override fun windowGainedFocus(e: WindowEvent) {
+                            // No-op: only lost focus should dismiss the popup.
+                        }
                         override fun windowLostFocus(e: WindowEvent) {
                             isVisible = false
                         }
-                    })
+                    }
+                    window.addWindowFocusListener(listener)
                     acquireWindowFocus(window)
+                    onDispose { window.removeWindowFocusListener(listener) }
                 }
                 PopupContent(onQuit = { exitApplication() })
             }
@@ -156,7 +160,9 @@ fun main() {
 
 // On macOS, a tray-opened window does not automatically become the active application —
 // so we must steal focus explicitly before WindowFocusListener can fire windowLostFocus.
+// This is a macOS-only workaround; on other platforms it is a no-op.
 private fun acquireWindowFocus(window: java.awt.Window) {
+    if (!System.getProperty("os.name", "").contains("Mac", ignoreCase = true)) return
     window.toFront()
     if (Desktop.isDesktopSupported()) {
         val desktop = Desktop.getDesktop()

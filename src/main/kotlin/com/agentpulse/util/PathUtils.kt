@@ -12,7 +12,11 @@ import java.nio.file.Path
  * @param defaultPath the fallback relative to user.home (e.g. ".copilot").
  */
 fun agentConfigDir(envVar: String?, defaultPath: String): Path =
-    envVar?.let(System::getenv)?.let(Path::of)
+    envVar
+        ?.let(System::getenv)
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?.let(Path::of)
         ?: Path.of(System.getProperty("user.home"), defaultPath)
 
 /**

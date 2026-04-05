@@ -151,7 +151,7 @@ class HookEventWatcher(
         // Sort by lastModifiedTime (ms precision) — more accurate than filename for same-second events.
         val processable = eventsDir.listDirectoryEntries()
             .filter { it.isProcessableEvent() }
-            .sortedBy { file -> runCatching { Files.getLastModifiedTime(file).toMillis() }.getOrDefault(0L) }
+            .sortedBy { file -> runCatching { Files.getLastModifiedTime(file).toMillis() }.getOrDefault(Long.MAX_VALUE) }
 
         val grouped = processable
             .filter { file -> file.nameWithoutExtension.split("-").size >= 4 }

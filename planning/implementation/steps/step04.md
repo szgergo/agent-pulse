@@ -162,8 +162,7 @@
   >    is a free call and provides millisecond precision.
   >
   > The epoch prefix was dropped. `HookEventWatcher` now uses `lastModifiedTime` for
-  > `HookEvent.timestamp`. `step03.md` intentionally retains the old format as a record of
-  > what was built in Step 3.
+  > `HookEvent.timestamp`.
 
   Create the file:
 

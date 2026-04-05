@@ -674,7 +674,7 @@ symlinks OK, 45 = HANG.
 must run on `Dispatchers.IO` (via `withContext(Dispatchers.IO) { ... }`). The only exception is the
 WatchService `take()` loop which runs in `runInterruptible(Dispatchers.IO)`.
 
-**Startup pattern**: All `HookDeployer` implementations (BaseHookDeployer, CopilotHookDeployer, etc.)
+**Startup pattern**: All `HookDeployer` implementations (AgentPulseHookDeployer, CopilotHookDeployer, etc.)
 are launched in parallel from a `CoroutineScope(SupervisorJob() + Dispatchers.IO)` in `main()`.
 Each deployer runs as an independent coroutine — one failure does not block others. This avoids
 blocking the main thread before `application { }` renders the tray icon. The watcher's

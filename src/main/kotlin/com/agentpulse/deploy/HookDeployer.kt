@@ -7,6 +7,6 @@ package com.agentpulse.deploy
  * Each implementation handles one agent (or the shared base infrastructure).
  * All deployers are launched in parallel on Dispatchers.IO from main().
  */
-interface HookDeployer {
+fun interface HookDeployer {
     fun deployAgentHook()
 }

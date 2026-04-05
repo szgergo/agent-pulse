@@ -29,7 +29,7 @@
 ```
 Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   → HookEventWatcher detects ENTRY_CREATE via WatchService
-  → Parses filename: <timestamp>-<agent>-<eventType>-<ppid>.json
+  → Parses filename: <timestamp>-<agent>-<eventType>-<ppid>-<suffix>.json
   → Reads file content and deserializes to typed HookPayload based on agent
   → Creates HookEvent(agent, eventType, pid, timestamp, payload)
   → AgentSessionManager.onEvent(event)
@@ -107,7 +107,7 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   - Uses blocking `take()` (not `poll()`) — blocks natively on `LinkedBlockingDeque`, zero CPU when idle
   - Wrapped in `runInterruptible(Dispatchers.IO)` for clean coroutine cancellation
   - No debounce needed — FSEvents coalesces events at kernel level
-  - On new file: parse filename `<timestamp>-<agent>-<eventType>-<ppid>.json`
+  - On new file: parse filename `<timestamp>-<agent>-<eventType>-<ppid>-<suffix>.json`
   - Read file content and deserialize to typed `HookPayload` via `kotlinx.serialization.json.Json`
   - Create `HookEvent(agent, eventType, pid, timestamp, payload)`
   - Call `AgentSessionManager.onEvent(event)`
@@ -359,18 +359,19 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   # MONITORING HOOK — MUST ALWAYS EXIT 0
   # A non-zero exit blocks agent Bash operations (hooks-observability #30).
   # Never use `set -e`. Every command guarded with `|| true` / `|| exit 0`.
-  trap 'exit 0' ERR
+  trap 'exit 0' EXIT
   EVENTS_DIR="$HOME/.agent-pulse/events"
   mkdir -p "$EVENTS_DIR" || exit 0
-  [ "$(find "$EVENTS_DIR" -name '*.json' -maxdepth 1 | head -1001 | wc -l)" -gt 1000 ] && exit 0
+  [ "$(find "$EVENTS_DIR" -maxdepth 1 -name '*.json' | head -1001 | wc -l)" -gt 1000 ] && exit 0
   T=$(mktemp "$EVENTS_DIR/.tmp.XXXXXX") || exit 0
+  SUFFIX=${T##*.tmp.}
   cat > "$T" || { rm -f "$T" 2>/dev/null; exit 0; }
-  mv "$T" "$EVENTS_DIR/$(date +%s)-$2-$1-$PPID.json" || { rm -f "$T" 2>/dev/null; exit 0; }
+  mv "$T" "$EVENTS_DIR/$(date +%s)-$2-$1-$PPID-$SUFFIX.json" || { rm -f "$T" 2>/dev/null; exit 0; }
   ```
   Arguments: `$1` = event_type, `$2` = agent_name. Stdin = JSON payload.
   Uses atomic `mktemp` + `mv` so the watcher never reads a half-written file.
   
-  > **⚠️ Hook exit code safety**: `trap 'exit 0' ERR` ensures the script ALWAYS exits 0, even on
+  > **⚠️ Hook exit code safety**: `trap 'exit 0' EXIT` ensures the script ALWAYS exits 0, even on
   > unexpected failures. This is CRITICAL — a monitoring hook that exits non-zero blocks ALL agent
   > Bash operations. See [hooks-observability #30](https://github.com/nicobailey/hooks-observability/issues/30)
   > and shared-context.md "Lessons from Competitor Research" for full details.
@@ -527,7 +528,7 @@ Agent hook fires → report.sh writes file to ~/.agent-pulse/events/
   - HookEventWatcher: JBR native FSEvents WatchService on ~/.agent-pulse/events/
   - Uses take() (blocking, zero CPU) + SensitivityWatchEventModifier.HIGH (100ms)
   - No polling, no debounce — FSEvents coalesces at kernel level
-  - Filename parsing: <timestamp>-<agent>-<eventType>-<ppid>.json
+  - Filename parsing: <timestamp>-<agent>-<eventType>-<ppid>-<suffix>.json
   - Startup recovery: group by (agent, pid), process only latest, delete stale
   - PID validation every 5s with synthetic sessionEnd
   - .tmp. file exclusion, cleanup after processing

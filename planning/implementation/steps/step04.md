@@ -258,7 +258,7 @@
   **Main.kt registration** — add to the deployers list:
   ```kotlin
   val deployers: List<HookDeployer> = listOf(
-      BaseHookDeployer(),
+      AgentPulseHookDeployer(),
       CopilotHookDeployer(),
   )
   ```

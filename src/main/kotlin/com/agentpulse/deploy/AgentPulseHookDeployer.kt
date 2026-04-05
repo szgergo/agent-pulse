@@ -16,7 +16,7 @@ import kotlin.io.path.writeText
  *
  * Skips deployment if config.json already records hooksDeployed = true.
  */
-class BaseHookDeployer(
+class AgentPulseHookDeployer(
     private val baseDir: Path = Path.of(System.getProperty("user.home"), ".agent-pulse"),
 ) : HookDeployer {
     private val configFile = baseDir.resolve("config.json")
@@ -49,7 +49,7 @@ class BaseHookDeployer(
         // Load report.sh from the bundled classpath resource (src/main/resources/hooks/report.sh).
         // Using getResourceAsStream avoids Kotlin string escaping and keeps the script
         // readable in git with proper syntax highlighting.
-        val reportShContent = BaseHookDeployer::class.java.getResourceAsStream("/hooks/report.sh")
+        val reportShContent = AgentPulseHookDeployer::class.java.getResourceAsStream("/hooks/report.sh")
             ?.bufferedReader()?.readText()
             ?: throw IllegalStateException("Bundled resource /hooks/report.sh not found — packaging error")
 

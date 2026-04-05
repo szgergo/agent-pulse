@@ -506,7 +506,7 @@ agent-pulse/
 │   │   │   └── HookEventWatcher.kt         (Step 3)
 │   │   ├── deploy/
 │   │   │   ├── HookDeployer.kt             (Step 3 — interface)
-│   │   │   ├── BaseHookDeployer.kt         (Step 3 — shared infra)
+│   │   │   ├── AgentPulseHookDeployer.kt   (Step 3 — shared infra)
 │   │   │   └── CopilotHookDeployer.kt      (Step 4)
 │   │   ├── otlp/
 │   │   │   └── OtlpReceiver.kt            (Step 9, POST-MVP)

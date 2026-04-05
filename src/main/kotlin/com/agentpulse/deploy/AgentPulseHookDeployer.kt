@@ -1,11 +1,11 @@
 package com.agentpulse.deploy
 
+import com.agentpulse.util.agentPulseBaseDir
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import java.nio.file.Files
-import java.nio.file.Path
 import kotlin.io.path.exists
 import kotlin.io.path.readText
 import kotlin.io.path.writeText
@@ -17,7 +17,7 @@ import kotlin.io.path.writeText
  * Skips deployment if config.json already records hooksDeployed = true.
  */
 class AgentPulseHookDeployer : HookDeployer {
-    private val baseDir = Path.of(System.getProperty("user.home"), ".agent-pulse")
+    private val baseDir = agentPulseBaseDir()
     private val configFile = baseDir.resolve("config.json")
     private val hooksDir = baseDir.resolve("hooks")
     private val eventsDir = baseDir.resolve("events")

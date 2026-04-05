@@ -11,6 +11,7 @@ import com.agentpulse.model.HookEvent
 import com.agentpulse.model.HookEventType
 import com.agentpulse.model.HookPayload
 import com.agentpulse.provider.AgentSessionManager
+import com.agentpulse.util.agentPulseEventsDir
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -34,7 +35,7 @@ import kotlin.io.path.readText
 
 class HookEventWatcher(
     private val stateManager: AgentSessionManager,
-    private val eventsDir: Path = Path.of(System.getProperty("user.home"), ".agent-pulse", "events"),
+    private val eventsDir: Path = agentPulseEventsDir(),
 ) {
     private companion object {
         const val MAX_HOOK_EVENT_SIZE_BYTES = 64 * 1024

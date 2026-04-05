@@ -6,6 +6,11 @@ Universal AI Agent Dashboard — a lightweight system tray app that monitors AI 
 
 **Prerequisites**: JDK 17+ (for building), [JBR 25](https://github.com/JetBrains/JetBrainsRuntime/releases) (for running)
 
+**Runtime guardrails**:
+- macOS runtime is supported **only** with JetBrains Runtime (JBR). Watcher performance and behavior rely on JBR.
+- Non-JBR runtime on macOS is unsupported.
+- Linux/Windows: use JBR for consistency (recommended, not a hard requirement yet).
+
 ```bash
 ./gradlew run          # launch the app
 ./gradlew build        # compile + tests

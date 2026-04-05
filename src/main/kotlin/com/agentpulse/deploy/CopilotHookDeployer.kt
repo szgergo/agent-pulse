@@ -33,7 +33,9 @@ class CopilotHookDeployer : HookDeployer {
         inputStream.use { input ->
             scriptDest.outputStream().use { output -> input.copyTo(output) }
         }
-        scriptDest.toFile().setExecutable(true, false)
+        if (!scriptDest.toFile().setExecutable(true, false)) {
+            println("[agent-pulse] Failed to make Copilot hook script executable at $scriptDest")
+        }
 
         // Step 2: write agent-pulse.json to Copilot hooks directory
         val copilotHomeDir = agentConfigDir("COPILOT_HOME", ".copilot")

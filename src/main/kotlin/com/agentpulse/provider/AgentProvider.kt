@@ -30,6 +30,12 @@ interface AgentProvider {
      */
     fun reconcileAgentState(event: HookEvent, currentState: AgentState?): AgentState
 
+    /**
+     * Resolve a session ID for the given PID. Provider-specific mechanism.
+     * Returns null if this provider does not support session ID resolution.
+     */
+    fun resolveSessionId(pid: Int): String? = null
+
     /** Default ID for a new session: "{typeName}_{pid}". */
     fun defaultId(event: HookEvent): String = "${agentType.name}_${event.pid}"
 

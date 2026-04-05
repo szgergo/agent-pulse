@@ -35,7 +35,13 @@ class AgentSessionManager(
         val provider = providerMap[event.agent] ?: return
         val sessions = _mutableAgentList.value
         val existingSession = sessions.find { it.agentType == event.agent && it.pid == event.pid }
-        val updatedSession = provider.reconcileAgentState(event, existingSession)
+
+        val updatedSession = runCatching {
+            provider.reconcileAgentState(event, existingSession)
+        }.getOrElse { e ->
+            System.err.println("[agent-pulse] ${event.agent.name} provider failed on ${event.eventType}: ${e.message}")
+            return  // keep previous state, don't crash
+        }
 
         if (updatedSession.status in TERMINAL_STATUSES) {
             if (existingSession != null) {

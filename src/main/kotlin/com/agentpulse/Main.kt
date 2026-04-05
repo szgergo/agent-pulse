@@ -40,6 +40,7 @@ import androidx.compose.ui.window.rememberWindowState
 import com.agentpulse.agent_pulse.generated.resources.Res
 import com.agentpulse.agent_pulse.generated.resources.tray_icon
 import com.agentpulse.deploy.AgentPulseHookDeployer
+import com.agentpulse.deploy.CopilotHookDeployer
 import com.agentpulse.deploy.HookDeployer
 import com.agentpulse.provider.AgentSessionManager
 import kotlinx.coroutines.CoroutineScope
@@ -50,6 +51,8 @@ import kotlinx.coroutines.launch
 import com.agentpulse.provider.ClaudeCodeProvider
 import com.agentpulse.provider.CodexProvider
 import com.agentpulse.provider.CopilotCliProvider
+import com.agentpulse.provider.CopilotIntelliJProvider
+import com.agentpulse.provider.CopilotVsCodeProvider
 import com.agentpulse.provider.CursorProvider
 import com.agentpulse.provider.GeminiProvider
 import com.agentpulse.watcher.HookEventWatcher
@@ -81,8 +84,12 @@ private val californiaVibesScheme = darkColorScheme(
 
 fun main() {
     // --- Step 3: Hook infrastructure — plain Kotlin, runs exactly once ---
-    val providers = listOf(
+    val copilotProviders = listOf(
         CopilotCliProvider(),
+        CopilotVsCodeProvider(),
+        CopilotIntelliJProvider(),
+    )
+    val providers = copilotProviders + listOf(
         ClaudeCodeProvider(),
         CursorProvider(),
         CodexProvider(),
@@ -94,7 +101,7 @@ fun main() {
     // blocking the main thread before the tray icon renders.
     val deployers: List<HookDeployer> = listOf(
         AgentPulseHookDeployer(),
-        // Step 4: CopilotHookDeployer(),
+        CopilotHookDeployer(),
     )
     val startupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     deployers.forEach { deployer ->

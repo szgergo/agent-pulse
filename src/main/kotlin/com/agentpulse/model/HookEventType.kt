@@ -24,12 +24,18 @@ enum class HookEventType {
     /** After tool invocation. Agents: Copilot/Cursor (`postToolUse`), Claude (`PostToolUse`). */
     PostToolUse,
 
+    /** Tool invocation failed. Agents: Copilot (postToolUseFailure, 1.0.15+). */
+    PostToolUseFailure,
+
     // ── Agent completion — Copilot CLI, Claude Code, Cursor ──────────────────────────────
     /** Agent response/turn is complete. Agents: Cursor (`stop`), Claude (`Stop`). */
     Stop,
 
     /** Subagent completed. Agents: Copilot (`subagentStop`), Claude (`SubagentStop`). */
     SubagentStop,
+
+    /** Subagent spawned. Agents: Copilot (subagentStart, 1.0.7+). */
+    SubagentStart,
 
     // ── Context management — Claude Code, Cursor ────────────────────────────────────────
     /** Before context compaction. Agents: Cursor (`preCompact`), Claude (`PreCompact`). */
@@ -45,11 +51,14 @@ enum class HookEventType {
     /** An error occurred during the session. Raw: `errorOccurred`. */
     ErrorOccurred,
 
+    /** Permission prompt shown. Agents: Copilot (permissionRequest, 1.0.16+). */
+    PermissionRequest,
+
     // ── Claude Code specific ─────────────────────────────────────────────────────────────
     /** User submitted a prompt (Claude naming — distinct from Copilot's UserPromptSubmitted). Raw: `UserPromptSubmit`. */
     UserPromptSubmit,
 
-    /** User notification triggered. Raw: `Notification`. */
+    /** Notification triggered. Agents: Claude (Notification), Copilot (notification, 1.0.18+, async — fires on agent completion). */
     Notification,
 
     // ── Gemini CLI specific ───────────────────────────────────────────────────────────────

@@ -23,6 +23,7 @@ import java.nio.file.FileSystems
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardWatchEventKinds
+import com.agentpulse.util.agentPulseEventsDir
 import java.time.Instant
 import kotlin.io.path.deleteIfExists
 import kotlin.io.path.exists
@@ -34,7 +35,7 @@ import kotlin.io.path.readText
 
 class HookEventWatcher(
     private val stateManager: AgentSessionManager,
-    private val eventsDir: Path = Path.of(System.getProperty("user.home"), ".agent-pulse", "events"),
+    private val eventsDir: Path = agentPulseEventsDir(),
 ) {
     private companion object {
         const val MAX_HOOK_EVENT_SIZE_BYTES = 64 * 1024

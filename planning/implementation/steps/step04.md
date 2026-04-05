@@ -205,8 +205,12 @@
 
   ```kotlin
   // In HookDeployer.kt
-  // COPILOT_HOME env var overrides ~/.copilot (official GitHub Copilot CLI feature).
+  // Uses agentConfigDir() helper from shared-context.md — all agent paths go through this.
   // See: https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference
+  //
+  // Threading: deployCopilotCliHooks() runs at startup from main(), BEFORE any CoroutineScope
+  // is created. No Dispatchers.IO wrapping needed. If this function is ever called lazily from
+  // a coroutine (e.g., triggered by first event), it MUST be wrapped in withContext(Dispatchers.IO).
 
   fun deployCopilotCliHooks() {
       // Step 1: deploy report-copilot.sh from classpath resource
@@ -219,12 +223,9 @@
       scriptDest.toFile().setExecutable(true, false)
 
       // Step 2: write agent-pulse.json to Copilot hooks directory
-      val copilotHome = System.getenv("COPILOT_HOME")
-          ?: Path.of(System.getProperty("user.home"), ".copilot").toString()
-      val copilotHomeDir = Path.of(copilotHome)
+      val copilotHomeDir = agentConfigDir("COPILOT_HOME", ".copilot")
       if (!copilotHomeDir.exists()) {
-          // Copilot not installed — skip gracefully, will retry on next app startup
-          println("[agent-pulse] Copilot home not found at $copilotHome — skipping hook deployment")
+          println("[agent-pulse] Copilot home not found at $copilotHomeDir — skipping hook deployment")
           return
       }
       // Copilot merges all *.json files from its hooks dir, so agent-pulse.json coexists
@@ -268,19 +269,23 @@
   ```kotlin
   abstract class CopilotAgentProvider : AgentProvider {
 
-      // Copilot-specific: scan $COPILOT_HOME/session-state/ for inuse.<PID>.lock files
-      override fun resolveSessionId(pid: Int): String? {
-          val copilotHome = System.getenv("COPILOT_HOME")
-              ?: Path.of(System.getProperty("user.home"), ".copilot").toString()
-          val sessionStateDir = Path.of(copilotHome, "session-state")
-          if (!sessionStateDir.exists()) return null
-          return sessionStateDir.listDirectoryEntries().firstOrNull { dir ->
+      // Copilot-specific: scan $COPILOT_HOME/session-state/ for inuse.<PID>.lock files.
+      // Wrapped in try/catch — filesystem errors (permissions, race conditions) must NOT
+      // prevent the event from being processed. Returns null on any error (session ID
+      // unknown is acceptable; losing the event is not).
+      override fun resolveSessionId(pid: Int): String? = try {
+          val sessionStateDir = agentConfigDir("COPILOT_HOME", ".copilot").resolve("session-state")
+          if (!sessionStateDir.exists()) null
+          else sessionStateDir.listDirectoryEntries().firstOrNull { dir ->
               dir.isDirectory() && dir.listDirectoryEntries("inuse.$pid.lock").isNotEmpty()
           }?.fileName?.toString()
+      } catch (e: Exception) {
+          System.err.println("[agent-pulse] Failed to resolve Copilot session ID for PID $pid: ${e.message}")
+          null
       }
 
       override fun reconcileAgentState(event: HookEvent, currentState: AgentState?): AgentState {
-          val p = event.payload as CopilotPayload
+          val p = event.payload as? CopilotPayload ?: return fallbackState(event)
           val sessionId = resolveSessionId(event.pid)
           return when (event.eventType) {
               HookEventType.SessionStart -> AgentState(
@@ -380,6 +385,34 @@
   > - Add `PostToolUseFailure` (Copilot 1.0.15+) — fires when a tool call fails; `PostToolUse` now fires for successful calls only since 1.0.15
   > - Add `PermissionRequest` (Copilot 1.0.16+) — fires on permission prompts
   > - Update `Notification` comment: now also Copilot (1.0.18+, async, fires on agent completion), not just Claude
+
+  **Hardening: `AgentStateManager.onEvent()` error isolation** (per shared-context.md §Adapter Error Isolation):
+
+  The current `onEvent()` calls `provider.reconcileAgentState()` with no error handling. A provider
+  exception (ClassCastException, IOException, NPE from malformed payload) would propagate to the
+  FileWatcher's catch block. Add `runCatching` so a single broken provider never crashes the event loop:
+
+  ```kotlin
+  // In AgentStateManager.kt — replace the direct call with runCatching
+  fun onEvent(event: HookEvent) {
+      val provider = providerMap[event.agent] ?: return
+      val currentAgentStates = _mutableAgentList.value
+      val existingState = currentAgentStates.find { it.agentType == event.agent && it.pid == event.pid }
+
+      val newState = runCatching {
+          provider.reconcileAgentState(event, existingState)
+      }.getOrElse { e ->
+          System.err.println("[agent-pulse] ${event.agent.name} provider failed on ${event.eventType}: ${e.message}")
+          return  // keep previous state, don't crash
+      }
+
+      _mutableAgentList.value = if (existingState != null) {
+          currentAgentStates.map { if (it.id == newState.id) newState else it }
+      } else {
+          currentAgentStates + newState
+      }
+  }
+  ```
 
 - [ ] **4.4 Verify full stack**
     - Run `./gradlew run` with hook deployed (HookDeployer fires on startup, overwrites the manual deploy)

@@ -643,7 +643,7 @@ sessions for users who set these vars.
 | Claude Code | `CLAUDE_CONFIG_DIR` | `~/.claude/` | 78% sessions invisible ([agentlytics #38](https://github.com/kamilstanuch/agentlytics/issues/38)) |
 | Codex CLI | `CODEX_HOME` | `~/.codex/` | All sessions invisible when set |
 | Gemini CLI | `GEMINI_CLI_HOME` | `~/.gemini/` | All sessions invisible when set |
-| Copilot CLI | _(none known)_ | `~/.copilot/` | N/A |
+| Copilot CLI | `COPILOT_HOME` | `~/.copilot/` | All sessions invisible when set |
 | Cursor | _(none known)_ | `~/.cursor/` | N/A |
 
 **Rule**: Every provider's deploy and read paths MUST check the env var first, falling back to the

@@ -1273,7 +1273,7 @@ val copilotHome = System.getenv("COPILOT_HOME")
     ?: Path.of(System.getProperty("user.home"), ".copilot").toString()
 ```
 
-This applies to both `HookDeployer.deployCopilotCliHooks()` (writes to `$copilotHome/hooks/`) and
+This applies to both `CopilotHookDeployer.deployAgentHook()` (writes to `$copilotHome/hooks/`) and
 `CopilotAgentProvider.resolveSessionId()` (scans `$copilotHome/session-state/`).
 
 ---

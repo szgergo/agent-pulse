@@ -590,7 +590,7 @@ Each step is a separate branch + PR. Within each step, sub-tasks are sequential.
 - Hook config: `~/.copilot/hooks/agent-pulse.json` mapping sessionStart, sessionEnd, postToolUse, userPromptSubmitted
 - `CopilotCliProvider.reconcileAgentState()` — handles 4 event types, creates/updates `AgentState`
 - Session ID resolution: PID → scan for `inuse.<PID>.lock` → parent dir UUID
-- `HookDeployer.deployCopilotCliHooks()` integration
+- `CopilotHookDeployer` (implements `HookDeployer` interface) integration
 
 > 📄 **Full implementation details**: See [`steps/step04.md`](implementation/steps/step04.md)
 

@@ -505,7 +505,9 @@ agent-pulse/
 │   │   ├── watcher/
 │   │   │   └── HookEventWatcher.kt         (Step 3)
 │   │   ├── deploy/
-│   │   │   └── HookDeployer.kt             (Step 3)
+│   │   │   ├── HookDeployer.kt             (Step 3 — interface)
+│   │   │   ├── BaseHookDeployer.kt         (Step 3 — shared infra)
+│   │   │   └── CopilotHookDeployer.kt      (Step 4)
 │   │   ├── otlp/
 │   │   │   └── OtlpReceiver.kt            (Step 9, POST-MVP)
 │   │   ├── ui/
@@ -672,8 +674,9 @@ symlinks OK, 45 = HANG.
 must run on `Dispatchers.IO` (via `withContext(Dispatchers.IO) { ... }`). The only exception is the
 WatchService `take()` loop which runs in `runInterruptible(Dispatchers.IO)`.
 
-**Startup pattern**: `HookDeployer.deployIfNeeded()` (and `deployCopilotCliHooks()` from step04)
-are launched from a `CoroutineScope(SupervisorJob() + Dispatchers.IO)` in `main()`. This avoids
+**Startup pattern**: All `HookDeployer` implementations (BaseHookDeployer, CopilotHookDeployer, etc.)
+are launched in parallel from a `CoroutineScope(SupervisorJob() + Dispatchers.IO)` in `main()`.
+Each deployer runs as an independent coroutine — one failure does not block others. This avoids
 blocking the main thread before `application { }` renders the tray icon. The watcher's
 `Files.createDirectories(eventsDir)` also runs inside its IO coroutine, not on the calling thread.
 

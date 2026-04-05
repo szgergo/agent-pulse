@@ -39,6 +39,7 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.agentpulse.agent_pulse.generated.resources.Res
 import com.agentpulse.agent_pulse.generated.resources.tray_icon
+import com.agentpulse.deploy.BaseHookDeployer
 import com.agentpulse.deploy.HookDeployer
 import com.agentpulse.provider.AgentStateManager
 import kotlinx.coroutines.CoroutineScope
@@ -89,10 +90,16 @@ fun main() {
     )
     val stateManager = AgentStateManager(providers)
 
-    // Deploy hook infrastructure on first run — fire-and-forget on IO to avoid
+    // Deploy hook infrastructure — each deployer runs in parallel on IO to avoid
     // blocking the main thread before the tray icon renders.
+    val deployers: List<HookDeployer> = listOf(
+        BaseHookDeployer(),
+        // Step 4: CopilotHookDeployer(),
+    )
     val startupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    startupScope.launch { HookDeployer().deployIfNeeded() }
+    deployers.forEach { deployer ->
+        startupScope.launch { deployer.deployAgentHook() }
+    }
 
     // Start event watcher — non-blocking, launches coroutines on its own IO scope.
     // Lives outside application { } so it is never restarted on recomposition and

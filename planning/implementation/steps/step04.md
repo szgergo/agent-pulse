@@ -190,10 +190,11 @@
   git commit -m "chore: add report-copilot.sh as classpath resource for HookDeployer"
   ```
 
-- [ ] **4.2 Automate deployment (HookDeployer)**
+- [ ] **4.2 Automate deployment (`CopilotHookDeployer`)**
 
-  Now that `report-copilot.sh` is a committed classpath resource, add `deployCopilotCliHooks()` to
-  `HookDeployer.kt` so agent-pulse deploys both the script and the hook config automatically on startup.
+  Create `CopilotHookDeployer : HookDeployer` in `deploy/CopilotHookDeployer.kt`.
+  Now that `report-copilot.sh` is a committed classpath resource, this deployer handles
+  Copilot-specific hook deployment. Register it in the `deployers` list in `Main.kt`.
 
   - Load `report-copilot.sh` from classpath via `getResourceAsStream`, write to `~/.agent-pulse/hooks/`, `chmod +x`
   - Write `agent-pulse.json` to the Copilot hooks directory (resolved via `COPILOT_HOME`)
@@ -204,14 +205,16 @@
   - Deploy the script first, then the config (same order as the PoC)
 
   ```kotlin
-  // In HookDeployer.kt
+  // In deploy/CopilotHookDeployer.kt
+  // Implements HookDeployer interface — registered in the deployers list in Main.kt.
   // Uses agentConfigDir() helper from shared-context.md — all agent paths go through this.
   // See: https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference
   //
-  // Threading: deployCopilotCliHooks() is launched from a Dispatchers.IO coroutine in main().
+  // Threading: all deployers are launched in parallel on Dispatchers.IO from main().
   // All filesystem I/O runs on the IO dispatcher — no additional withContext needed.
 
-  fun deployCopilotCliHooks() {
+  class CopilotHookDeployer : HookDeployer {
+      override fun deployAgentHook() {
       // Step 1: deploy report-copilot.sh from classpath resource
       val agentPulseHooksDir = Path.of(System.getProperty("user.home"), ".agent-pulse", "hooks")
       agentPulseHooksDir.createDirectories()
@@ -248,7 +251,16 @@
           }
       }
       hookConfig.writeText(Json { prettyPrint = true }.encodeToString(configJson))
+      }
   }
+  ```
+
+  **Main.kt registration** — add to the deployers list:
+  ```kotlin
+  val deployers: List<HookDeployer> = listOf(
+      BaseHookDeployer(),
+      CopilotHookDeployer(),
+  )
   ```
 
 - [ ] **4.3 `AgentProvider` interface + `CopilotAgentProvider` implementation**
@@ -432,7 +444,7 @@
   - resolveSessionId() in AgentProvider interface (default null); Copilot override scans session-state/
   - reconcileAgentState() + fallbackState() in CopilotAgentProvider abstract base class
   - Three concrete Copilot providers, all registered in Main.kt
-  - HookDeployer.deployCopilotCliHooks() automates deployment on startup
+  - CopilotHookDeployer (implements HookDeployer interface) automates deployment on startup
 
   Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
   git push -u origin step-4-copilot-provider

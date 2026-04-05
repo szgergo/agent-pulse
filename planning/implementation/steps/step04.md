@@ -208,9 +208,8 @@
   // Uses agentConfigDir() helper from shared-context.md — all agent paths go through this.
   // See: https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference
   //
-  // Threading: deployCopilotCliHooks() runs at startup from main(), BEFORE any CoroutineScope
-  // is created. No Dispatchers.IO wrapping needed. If this function is ever called lazily from
-  // a coroutine (e.g., triggered by first event), it MUST be wrapped in withContext(Dispatchers.IO).
+  // Threading: deployCopilotCliHooks() is launched from a Dispatchers.IO coroutine in main().
+  // All filesystem I/O runs on the IO dispatcher — no additional withContext needed.
 
   fun deployCopilotCliHooks() {
       // Step 1: deploy report-copilot.sh from classpath resource

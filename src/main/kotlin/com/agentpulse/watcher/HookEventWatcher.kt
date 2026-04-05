@@ -47,13 +47,15 @@ class HookEventWatcher(
         name.endsWith(".json") && !name.startsWith(".tmp.")
 
     fun start() {
-        Files.createDirectories(eventsDir)
         startWatchingWithRecovery()
         startPidValidation()
     }
 
     private fun startWatchingWithRecovery() {
         scope.launch {
+            // Ensure events directory exists — runs on Dispatchers.IO (scope dispatcher).
+            Files.createDirectories(eventsDir)
+
             // 1. Register WatchService FIRST — starts queuing events immediately.
             //    This must happen before processExistingFiles so no events are missed
             //    in the gap between the directory listing and the watch registration.

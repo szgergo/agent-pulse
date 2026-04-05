@@ -41,6 +41,11 @@ import com.agentpulse.agent_pulse.generated.resources.Res
 import com.agentpulse.agent_pulse.generated.resources.tray_icon
 import com.agentpulse.deploy.HookDeployer
 import com.agentpulse.provider.AgentStateManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import com.agentpulse.provider.ClaudeCodeProvider
 import com.agentpulse.provider.CodexProvider
 import com.agentpulse.provider.CopilotCliProvider
@@ -84,8 +89,10 @@ fun main() {
     )
     val stateManager = AgentStateManager(providers)
 
-    // Deploy hook infrastructure on first run
-    HookDeployer().deployIfNeeded()
+    // Deploy hook infrastructure on first run — fire-and-forget on IO to avoid
+    // blocking the main thread before the tray icon renders.
+    val startupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    startupScope.launch { HookDeployer().deployIfNeeded() }
 
     // Start event watcher — non-blocking, launches coroutines on its own IO scope.
     // Lives outside application { } so it is never restarted on recomposition and
@@ -93,8 +100,11 @@ fun main() {
     val watcher = HookEventWatcher(stateManager)
     watcher.start()
 
-    // Clean shutdown: cancel watcher's coroutines when the JVM exits
-    Runtime.getRuntime().addShutdownHook(Thread { watcher.stop() })
+    // Clean shutdown: cancel startup + watcher coroutines when the JVM exits
+    Runtime.getRuntime().addShutdownHook(Thread {
+        watcher.stop()
+        startupScope.cancel()
+    })
 
     // stateManager.agents is available for Step 5 to observe
     application {

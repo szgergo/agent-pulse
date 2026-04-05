@@ -672,6 +672,11 @@ symlinks OK, 45 = HANG.
 must run on `Dispatchers.IO` (via `withContext(Dispatchers.IO) { ... }`). The only exception is the
 WatchService `take()` loop which runs in `runInterruptible(Dispatchers.IO)`.
 
+**Startup pattern**: `HookDeployer.deployIfNeeded()` (and `deployCopilotCliHooks()` from step04)
+are launched from a `CoroutineScope(SupervisorJob() + Dispatchers.IO)` in `main()`. This avoids
+blocking the main thread before `application { }` renders the tray icon. The watcher's
+`Files.createDirectories(eventsDir)` also runs inside its IO coroutine, not on the calling thread.
+
 ### 🟡 Format Stability (Defensive Parsing)
 
 All observed schema changes across all 5 agents are additive-only: new fields appear, existing fields

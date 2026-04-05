@@ -164,11 +164,15 @@ fun main() {
 private fun acquireWindowFocus(window: java.awt.Window) {
     if (!System.getProperty("os.name", "").contains("Mac", ignoreCase = true)) return
     window.toFront()
-    if (Desktop.isDesktopSupported()) {
-        val desktop = Desktop.getDesktop()
-        if (desktop.isSupported(Desktop.Action.APP_REQUEST_FOREGROUND)) {
-            desktop.requestForeground(true)
+    runCatching {
+        if (Desktop.isDesktopSupported()) {
+            val desktop = Desktop.getDesktop()
+            if (desktop.isSupported(Desktop.Action.APP_REQUEST_FOREGROUND)) {
+                desktop.requestForeground(true)
+            }
         }
+    }.onFailure { error ->
+        System.err.println("Failed to request app foreground for popup window: ${error.message}")
     }
     window.requestFocus()
 }

@@ -436,7 +436,7 @@ Branch naming: `step-1-scaffold`, `step-2-data-model`, `step-3-detection`, `step
 │  │     On startup: group queued files by (agent, pid), process      │ │
 │  │                 only latest per group, delete stale ones          │ │
 │  │     On ENTRY_CREATE:                                              │ │
-│  │       Parse filename → agent, event, PID, timestamp               │ │
+│  │       Parse filename → agent, event, PID (timestamp from mtime)   │ │
 │  │       Read file → raw event JSON                                  │ │
 │  │       Resolve session ID (per-agent Kotlin logic)                 │ │
 │  │       Update StateFlow<List<Agent>>                               │ │
@@ -602,7 +602,7 @@ Key research findings that shaped this plan:
 ## Notes
 
 - Hook script is 3 lines of POSIX sh — zero external dependencies
-- Filename encodes metadata: `<timestamp>-<agent>-<event>-<ppid>.json`
+- Filename encodes metadata: `<agent>-<event>-<ppid>-<suffix>.json` (no epoch prefix — timestamp comes from `lastModifiedTime`, ms precision)
 - Session ID resolution happens in Kotlin, not in the hook script
 - On first run, user must restart agent sessions after hook deployment
 - Global hotkey uses JNA + Carbon `RegisterEventHotKey` (same as JetBrains Toolbox) — no Accessibility permission needed
@@ -631,7 +631,7 @@ when a Claude Code Bash hook returns a non-zero exit code, Claude cannot execute
 commands in that session.
 
 **Rule**: `report.sh` must **ALWAYS** exit 0. Every command must be wrapped with `|| true` or the
-script must use `trap 'exit 0' ERR`. Never use `set -e` in a monitoring hook script.
+script must use `trap 'exit 0' EXIT`. Never use `set -e` in a monitoring hook script.
 
 **Rule**: The Stop hook fires WHILE the agent is shutting down. If a Stop hook invokes the agent's
 own CLI (directly or indirectly), it can create an infinite loop. Guard with an env var:

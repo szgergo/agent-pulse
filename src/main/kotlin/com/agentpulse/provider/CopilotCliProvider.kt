@@ -1,16 +1,7 @@
 package com.agentpulse.provider
 
-import com.agentpulse.model.AgentState
 import com.agentpulse.model.AgentType
-import com.agentpulse.model.HookEvent
 
-class CopilotCliProvider : AgentProvider {
+class CopilotCliProvider : CopilotAgentProvider() {
     override val agentType = AgentType.CopilotCli
-    override fun reconcileAgentState(event: HookEvent, currentState: AgentState?): AgentState {
-        // Stub — real implementation in Step 4
-        return currentState?.copy(
-            eventCount = currentState.eventCount + 1,
-            lastActivity = event.timestamp,
-        ) ?: initialState(event)
-    }
 }

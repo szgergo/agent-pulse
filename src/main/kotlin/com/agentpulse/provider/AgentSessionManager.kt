@@ -4,6 +4,7 @@ import com.agentpulse.model.AgentState
 import com.agentpulse.model.AgentStatus
 import com.agentpulse.model.AgentType
 import com.agentpulse.model.HookEvent
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -35,7 +36,14 @@ class AgentSessionManager(
         val provider = providerMap[event.agent] ?: return
         val sessions = _mutableAgentList.value
         val existingSession = sessions.find { it.agentType == event.agent && it.pid == event.pid }
-        val updatedSession = provider.reconcileAgentState(event, existingSession)
+
+        val updatedSession = runCatching {
+            provider.reconcileAgentState(event, existingSession)
+        }.getOrElse { e ->
+            if (e is CancellationException) throw e
+            System.err.println("[agent-pulse] ${event.agent.name} provider failed on ${event.eventType}: ${e.message}")
+            return  // keep previous state, don't crash
+        }
 
         if (updatedSession.status in TERMINAL_STATUSES) {
             if (existingSession != null) {

@@ -34,11 +34,11 @@
   #!/bin/sh
   # Copilot hook — detects copilot-cli / copilot-vscode / copilot-intellij via $PPID inspection.
   # MUST always exit 0 — failure must never block the Copilot session.
-  trap 'exit 0' ERR
+  trap 'exit 0' EXIT
 
   EVENTS_DIR="$HOME/.agent-pulse/events"
   mkdir -p "$EVENTS_DIR" || exit 0
-  [ "$(find "$EVENTS_DIR" -name '*.json' -maxdepth 1 | head -1001 | wc -l)" -gt 1000 ] && exit 0
+  [ "$(find "$EVENTS_DIR" -maxdepth 1 -name '*.json' | head -1001 | wc -l)" -gt 1000 ] && exit 0
 
   # Two-level process tree detection:
   #   $PPID  = direct parent (the agent process that spawned this hook)
@@ -62,8 +62,9 @@
   fi
 
   T=$(mktemp "$EVENTS_DIR/.tmp.XXXXXX") || exit 0
+  SUFFIX=${T##*.tmp.}
   cat > "$T" || { rm -f "$T" 2>/dev/null; exit 0; }
-  mv "$T" "$EVENTS_DIR/$(date +%s)-${AGENT_TYPE}-$1-$PPID.json" || { rm -f "$T" 2>/dev/null; exit 0; }
+  mv "$T" "$EVENTS_DIR/${AGENT_TYPE}-$1-$PPID-$SUFFIX.json" || { rm -f "$T" 2>/dev/null; exit 0; }
   EOF
   chmod +x "$HOME/.agent-pulse/hooks/report-copilot.sh"
   ```
@@ -146,7 +147,24 @@
   (`getResourceAsStream("/hooks/report-copilot.sh")`). The PoC wrote it via heredoc directly to
   `~/.agent-pulse/hooks/` and then deleted it — it was never committed. This step adds it to the repo.
 
-  Script content is identical to what was used in the PoC (4.0a). Create the file:
+  Script content is identical to what was used in the PoC (4.0a), with one deliberate
+  difference from the Step 3 generic hook format: **the `$(date +%s)-` epoch prefix has been
+  removed from the filename**.
+
+  > 📝 **Implementation note — epoch prefix removed from filenames**
+  >
+  > Step 3's `report.sh` used `{epoch}-{agentType}-{eventType}-{pid}-{suffix}.json` as the
+  > filename format, where the epoch served as the event timestamp source.
+  > During Step 4 a Copilot review identified two issues with this approach:
+  > 1. `date +%s` provides only 1-second precision — multiple events in the same second for
+  >    the same PID produce identical filenames, silently overwriting earlier events.
+  > 2. `HookEventWatcher` already reads the file from disk, so `Files.getLastModifiedTime()`
+  >    is a free call and provides millisecond precision.
+  >
+  > The epoch prefix was dropped. `HookEventWatcher` now uses `lastModifiedTime` for
+  > `HookEvent.timestamp`.
+
+  Create the file:
 
   ```sh
   mkdir -p src/main/resources/hooks
@@ -154,11 +172,11 @@
   #!/bin/sh
   # Copilot hook — detects copilot-cli / copilot-vscode / copilot-intellij via $PPID inspection.
   # MUST always exit 0 — failure must never block the Copilot session.
-  trap 'exit 0' ERR
+  trap 'exit 0' EXIT
 
   EVENTS_DIR="$HOME/.agent-pulse/events"
   mkdir -p "$EVENTS_DIR" || exit 0
-  [ "$(find "$EVENTS_DIR" -name '*.json' -maxdepth 1 | head -1001 | wc -l)" -gt 1000 ] && exit 0
+  [ "$(find "$EVENTS_DIR" -maxdepth 1 -name '*.json' | head -1001 | wc -l)" -gt 1000 ] && exit 0
 
   # Two-level process tree detection:
   #   $PPID  = direct parent (the agent process that spawned this hook)
@@ -182,13 +200,22 @@
   fi
 
   T=$(mktemp "$EVENTS_DIR/.tmp.XXXXXX") || exit 0
+  SUFFIX=${T##*.tmp.}
   cat > "$T" || { rm -f "$T" 2>/dev/null; exit 0; }
-  mv "$T" "$EVENTS_DIR/$(date +%s)-${AGENT_TYPE}-$1-$PPID.json" || { rm -f "$T" 2>/dev/null; exit 0; }
+  mv "$T" "$EVENTS_DIR/${AGENT_TYPE}-$1-$PPID-$SUFFIX.json" || { rm -f "$T" 2>/dev/null; exit 0; }
   EOF
   chmod +x src/main/resources/hooks/report-copilot.sh
   git add src/main/resources/hooks/report-copilot.sh
   git commit -m "chore: add report-copilot.sh as classpath resource for HookDeployer"
   ```
+
+  > **📝 Implementation note — filename format changed during PR review:**
+  > The original spec used `$(date +%s)-` as an epoch prefix: `{epoch}-{agentType}-{eventType}-{pid}-{suffix}.json`.
+  > During implementation this was simplified: the epoch prefix was removed and `Files.getLastModifiedTime()`
+  > is used as the event timestamp instead. The final format is `{agentType}-{eventType}-{pid}-{suffix}.json`.
+  > Rationale: the event file is loaded anyway (for the payload), so `lastModifiedTime` is a free read with
+  > millisecond precision — strictly better than the 1-second granularity of `date +%s`. step03.md retains
+  > the original design since it is a completed step; this step's source is what counts.
 
 - [ ] **4.2a Create path utility functions (`PathUtils.kt`)**
 

@@ -197,7 +197,10 @@
 
   - Load `report-copilot.sh` from classpath via `getResourceAsStream`, write to `~/.agent-pulse/hooks/`, `chmod +x`
   - Write `agent-pulse.json` to the Copilot hooks directory (resolved via `COPILOT_HOME`)
-  - Never overwrite existing hook files from other tools — only write our own `agent-pulse.json`
+  - Copilot merges **all** `*.json` files from its hooks directory — other hook files are untouched and stay active alongside ours
+  - Always overwrite our own `agent-pulse.json` on startup (keeps it in sync after app updates)
+  - Guard step 2 with a Copilot-installed check: if `COPILOT_HOME`/`~/.copilot` does not exist, log a warning and skip — Copilot is not installed
+  - `agentPulseHooksDir.createDirectories()` is unconditional (it's our own directory); `copilotHooksDir.createDirectories()` only runs after confirming the parent exists
   - Deploy the script first, then the config (same order as the PoC)
 
   ```kotlin
@@ -218,8 +221,16 @@
       // Step 2: write agent-pulse.json to Copilot hooks directory
       val copilotHome = System.getenv("COPILOT_HOME")
           ?: Path.of(System.getProperty("user.home"), ".copilot").toString()
-      val copilotHooksDir = Path.of(copilotHome, "hooks")
-      copilotHooksDir.createDirectories()
+      val copilotHomeDir = Path.of(copilotHome)
+      if (!copilotHomeDir.exists()) {
+          // Copilot not installed — skip gracefully, will retry on next app startup
+          println("[agent-pulse] Copilot home not found at $copilotHome — skipping hook deployment")
+          return
+      }
+      // Copilot merges all *.json files from its hooks dir, so agent-pulse.json coexists
+      // safely alongside any user-defined hook configs. We only write our own file.
+      val copilotHooksDir = copilotHomeDir.resolve("hooks")
+      copilotHooksDir.createDirectories()  // safe: only creates 'hooks' subdir; parent already confirmed
 
       val hookConfig = copilotHooksDir.resolve("agent-pulse.json")
       val events = listOf("sessionStart", "sessionEnd", "postToolUse", "userPromptSubmitted", "subagentStart")

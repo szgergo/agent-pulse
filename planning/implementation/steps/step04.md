@@ -147,7 +147,25 @@
   (`getResourceAsStream("/hooks/report-copilot.sh")`). The PoC wrote it via heredoc directly to
   `~/.agent-pulse/hooks/` and then deleted it — it was never committed. This step adds it to the repo.
 
-  Script content is identical to what was used in the PoC (4.0a). Create the file:
+  Script content is identical to what was used in the PoC (4.0a), with one deliberate
+  difference from the Step 3 generic hook format: **the `$(date +%s)-` epoch prefix has been
+  removed from the filename**.
+
+  > 📝 **Implementation note — epoch prefix removed from filenames**
+  >
+  > Step 3's `report.sh` used `{epoch}-{agentType}-{eventType}-{pid}-{suffix}.json` as the
+  > filename format, where the epoch served as the event timestamp source.
+  > During Step 4 a Copilot review identified two issues with this approach:
+  > 1. `date +%s` provides only 1-second precision — multiple events in the same second for
+  >    the same PID produce identical filenames, silently overwriting earlier events.
+  > 2. `HookEventWatcher` already reads the file from disk, so `Files.getLastModifiedTime()`
+  >    is a free call and provides millisecond precision.
+  >
+  > The epoch prefix was dropped. `HookEventWatcher` now uses `lastModifiedTime` for
+  > `HookEvent.timestamp`. `step03.md` intentionally retains the old format as a record of
+  > what was built in Step 3.
+
+  Create the file:
 
   ```sh
   mkdir -p src/main/resources/hooks

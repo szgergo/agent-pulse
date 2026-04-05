@@ -28,7 +28,9 @@ class CopilotHookDeployer : HookDeployer {
         val hooksDir = agentPulseHooksDir()
         hooksDir.createDirectories()
         val scriptDest = hooksDir.resolve("report-copilot.sh")
-        javaClass.getResourceAsStream("/hooks/report-copilot.sh")!!.use { input ->
+        val inputStream = javaClass.getResourceAsStream("/hooks/report-copilot.sh")
+        checkNotNull(inputStream) { "Bundled resource /hooks/report-copilot.sh not found — packaging error" }
+        inputStream.use { input ->
             scriptDest.outputStream().use { output -> input.copyTo(output) }
         }
         scriptDest.toFile().setExecutable(true, false)

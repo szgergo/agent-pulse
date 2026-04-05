@@ -28,6 +28,9 @@ abstract class CopilotAgentProvider : AgentProvider {
         null
     }
 
+    private fun incrementCounter(extra: Map<String, String>, key: String): String =
+        ((extra[key]?.toIntOrNull() ?: 0) + 1).toString()
+
     override fun reconcileAgentState(event: HookEvent, currentState: AgentState?): AgentState {
         val p = event.payload as? CopilotPayload ?: return fallbackState(event)
         val sessionId = resolveSessionId(event.pid)
@@ -55,7 +58,7 @@ abstract class CopilotAgentProvider : AgentProvider {
                     lastActivity = event.timestamp,
                     extra = currentState.extra + buildMap {
                         toolName?.let { put("lastTool", it) }
-                        put("toolCalls", ((currentState.extra["toolCalls"]?.toIntOrNull() ?: 0) + 1).toString())
+                        put("toolCalls", incrementCounter(currentState.extra, "toolCalls"))
                     },
                 ) ?: fallbackState(event)
             }
@@ -63,14 +66,14 @@ abstract class CopilotAgentProvider : AgentProvider {
                 eventCount = currentState.eventCount + 1,
                 lastActivity = event.timestamp,
                 extra = currentState.extra + mapOf(
-                    "subagents" to ((currentState.extra["subagents"]?.toIntOrNull() ?: 0) + 1).toString()
+                    "subagents" to incrementCounter(currentState.extra, "subagents")
                 ),
             ) ?: fallbackState(event)
             HookEventType.UserPromptSubmitted -> currentState?.copy(
                 eventCount = currentState.eventCount + 1,
                 lastActivity = event.timestamp,
                 extra = currentState.extra + mapOf(
-                    "prompts" to ((currentState.extra["prompts"]?.toIntOrNull() ?: 0) + 1).toString()
+                    "prompts" to incrementCounter(currentState.extra, "prompts")
                 ),
             ) ?: fallbackState(event)
             else -> currentState?.copy(

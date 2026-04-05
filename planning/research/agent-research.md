@@ -34,6 +34,7 @@ This is the single comprehensive research document for agent-pulse's agent detec
    - [GitHub Copilot CLI](#github-copilot-cli)
    - [GitHub Copilot in VS Code](#github-copilot-in-vs-code)
    - [GitHub Copilot in IntelliJ](#github-copilot-in-intellij)
+   - [Copilot Hook-Based Client Detection](#copilot-hook-based-client-detection-report-copilotsh)
    - [Claude Code CLI](#claude-code-cli)
    - [Claude Code in VS Code](#claude-code-in-vs-code)
    - [OpenAI Codex CLI](#openai-codex-cli)
@@ -1182,6 +1183,98 @@ Source: [GitHub blog: Track Copilot sessions from VS Code](https://github.blog/c
 **Confidence level**: High — distinctive binary path, but limited session metadata outside the IDE.
 
 Source: [JetBrains Marketplace: GitHub Copilot plugin](https://plugins.jetbrains.com/plugin/17718-github-copilot--your-ai-pair-programmer), [GitHub blog: Copilot in JetBrains](https://github.blog/changelog/2025-05-19-agent-mode-and-mcp-support-for-copilot-in-jetbrains-eclipse-and-xcode-now-in-public-preview/)
+
+---
+
+### Copilot Hook-Based Client Detection (report-copilot.sh)
+
+The Copilot hooks directory (`$COPILOT_HOME/hooks/` or `~/.copilot/hooks/`) fires for **all** Copilot
+clients simultaneously — CLI, VS Code extension, IntelliJ plugin, and CLI run inside IDE terminals.
+The hook payload contains no client-type field. `$PPID` process tree inspection is the only signal.
+
+#### Process Hierarchy per Scenario
+
+**VS Code integrated terminal** (user runs `copilot` in terminal — correctly `copilot-cli`):
+```
+VS Code Main Process
+  └─ PTY Host (Node.js, terminalProcess.js)   ← does NOT contain copilotCLIShim
+       └─ zsh/bash (shell in integrated terminal)
+            └─ copilot binary  ← $PPID of hook subprocess
+                   └─ hook subprocess
+```
+GPID = shell (bash/zsh) — no shim or IntelliJ marker → **`copilot-cli` ✓**
+
+**IntelliJ integrated terminal** (user runs `copilot` in terminal — correctly `copilot-cli`):
+```
+IntelliJ IDEA process
+  └─ pty4j native helper   ← transparent, no IntelliJ plugin marker in process args
+       └─ zsh/bash (shell in integrated terminal)
+            └─ copilot binary  ← $PPID of hook subprocess
+                   └─ hook subprocess
+```
+GPID = shell (bash/zsh) — pty4j is transparent → **`copilot-cli` ✓**
+
+**VS Code Copilot extension** (via shim):
+```
+Code Helper (Plugin) [copilotCLIShim.js]   ← GPID (direct) or GPID's parent (via wrapper)
+  └─ /bin/sh .../copilotCli/copilot         ← possible intermediate shell wrapper
+       └─ copilot Node.js runtime  ← $PPID of hook subprocess
+              └─ hook subprocess
+```
+GPID args contain `copilotCLIShim` (direct spawn) or path `copilotCli/copilot` (via wrapper) → **`copilot-vscode` ✓**
+
+**IntelliJ Copilot plugin — native (direct)**:
+```
+copilot-language-server --stdio   ← $PPID (has github-copilot-intellij in path)
+  └─ hook subprocess
+```
+`$PPID` args contain `github-copilot-intellij` — unambiguous → **`copilot-intellij` ✓**
+
+**IntelliJ Copilot plugin — ACP mode**:
+```
+copilot-language-server --acp    ← GPID (has github-copilot-intellij in path)
+  └─ /opt/homebrew/bin/copilot --acp --stdio  ← $PPID (neutral path!)
+         └─ hook subprocess
+```
+`$PPID` = copilot binary — **no** `github-copilot-intellij` in args.
+GPID = language-server — **has** `github-copilot-intellij` → detected via grandparent check → **`copilot-intellij` ✓**
+
+> **Design decision — `--acp` flag rejected:** The `--acp` flag was considered as a detection
+> signal but rejected. ACP is a GitHub protocol that any IDE could theoretically use. Detection
+> relies solely on path markers (`github-copilot-intellij`), not flags.
+
+#### Complete Detection Matrix
+
+| Scenario | `$PPID` signal | GPID signal | Result |
+|---|---|---|---|
+| IntelliJ plugin direct | `github-copilot-intellij` in path | — | `copilot-intellij` |
+| IntelliJ ACP | neutral | `github-copilot-intellij` in path | `copilot-intellij` |
+| VS Code shim (direct) | neutral | `copilotCLIShim` in path | `copilot-vscode` |
+| VS Code shim (via /bin/sh wrapper) | neutral | `copilotCli/copilot` in path | `copilot-vscode` |
+| Homebrew CLI in terminal | neutral | shell (bash/zsh) | `copilot-cli` |
+| npm CLI in terminal | neutral | shell (bash/zsh) | `copilot-cli` |
+| CLI in VS Code terminal | neutral | shell (bash/zsh) | `copilot-cli` |
+| CLI in IntelliJ terminal | neutral | shell (pty4j/bash) | `copilot-cli` |
+
+#### COPILOT_HOME Environment Variable
+
+**Official env var: `COPILOT_HOME`** — supported by GitHub Copilot CLI.
+
+Source: [GitHub Docs — CLI configuration directory](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference#changing-the-location-of-the-configuration-directory)
+
+> Set `COPILOT_HOME` to override the default `~/.copilot` location. A `--config-dir` flag also
+> exists and takes precedence over `COPILOT_HOME`.
+
+**Precedence**: `--config-dir` > `COPILOT_HOME` > `~/.copilot` (default)
+
+Never hardwire `~/.copilot` in code or docs. Always resolve:
+```kotlin
+val copilotHome = System.getenv("COPILOT_HOME")
+    ?: Path.of(System.getProperty("user.home"), ".copilot").toString()
+```
+
+This applies to both `HookDeployer.deployCopilotCliHooks()` (writes to `$copilotHome/hooks/`) and
+`CopilotAgentProvider.resolveSessionId()` (scans `$copilotHome/session-state/`).
 
 ---
 

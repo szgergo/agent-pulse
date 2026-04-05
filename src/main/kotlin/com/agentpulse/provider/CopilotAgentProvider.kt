@@ -63,7 +63,7 @@ abstract class CopilotAgentProvider : AgentProvider {
                 status = AgentStatus.Stopped,
                 eventCount = currentState.eventCount + 1,
                 lastActivity = event.timestamp,
-            ) ?: fallbackState(event).copy(status = AgentStatus.Stopped)
+            ) ?: fallbackState(event, AgentStatus.Stopped)
             HookEventType.PostToolUse -> {
                 val toolName = p.toolName
                 currentState?.copy(
@@ -96,13 +96,13 @@ abstract class CopilotAgentProvider : AgentProvider {
         }
     }
 
-    private fun fallbackState(event: HookEvent): AgentState {
+    private fun fallbackState(event: HookEvent, initialStatus: AgentStatus = AgentStatus.Running): AgentState {
         val sessionId = resolveSessionId(event.pid)
         return AgentState(
             id = "${agentType.name}_${sessionId ?: event.pid}",
             name = "${agentType.displayName} — ${sessionId?.take(8) ?: "PID ${event.pid}"}",
             agentType = agentType,
-            status = AgentStatus.Running,
+            status = initialStatus,
             pid = event.pid,
             sessionId = sessionId,
             eventCount = 1,
